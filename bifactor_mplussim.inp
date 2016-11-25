@@ -1,0 +1,28 @@
+!mplus 
+title: mplus bifactor sim
+montecarlo:
+	names = y1-y18;
+	nobs = 500;
+	nreps = 500;
+	save = bifactor.dat;
+
+model population:
+fg by y1-y18*.8; 
+fs1 by y1-y9*.4; 
+fs2 by y10-y18*.4; 
+fg-fs2@1; 
+fg-fs2 with fg-fs2@0;
+y1-y18*.48; !1.0 item variance
+
+model:
+
+fg by y1-y18*.8;
+fs1 by y1-y9*.4; 
+fs2 by y10-y18*.4; 
+fg-fs2@1; 
+fg-fs2 with fg-fs2@0;
+y1-y12*.48; !1.0 item variance
+
+output:
+	tech9;
+
