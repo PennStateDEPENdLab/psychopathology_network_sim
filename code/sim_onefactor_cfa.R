@@ -10,11 +10,26 @@ library(ggplot2)
 library(abind)
 library(igraph)
 
-x <- demomaster(nexamples=1, nindicators=24, nfactors=3, nreplications=20, n=400, 
+x <- demomaster(nexamples=1, nindicators=24, nfactors=3, nreplications=200, n=400, 
     errorvars="eqresidvar", ivar=0.5, thetacorlist=NULL)
 
+x <- demomaster(nexamples=1, nindicators=24, nfactors=1, nreplications=200, n=400, 
+    errorvars="eqresidvar", ivar=0.5, thetacorlist=NULL)
 
-dd <- demo1()
+x <- demomaster(nexamples=1, nindicators=24, nfactors=1, nreplications=200, n=400, 
+    errorvars="eqvars", ivar=1, thetacorlist=NULL)
+
+
+#MNH Nov2016: checked whether demomaster supersedes demo1. yes, confirmed that all data structures and results are identical
+##First demonstration: correlation of one-factor CFA loadings with centrality measures
+
+dd <- demomaster(nexamples=2, nindicators=10, nfactors=1, nreplications=200, n=400, 
+    loadingsampler=seq(.4, .95, .05), errorvars="eqresidvar", ivar=0.5, thetacorlist=NULL)
+
+dd[[1]]$graph_v_factor$EBICglasso$corr_v_fitted
+dd[[2]]$graph_v_factor$EBICglasso$corr_v_fitted
+
+
 #save(file="psychopathology_networks_demo1_4Nov2016.RData", dd)
 #load(file="psychopathology_networks_demo1_4Nov2016.RData")
 

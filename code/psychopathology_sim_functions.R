@@ -85,6 +85,7 @@ simCFAGraphs <- function(model, nreplications, n, graphmethods=c("EBICglasso", "
   require(parallel)
   require(abind)
   require(bootnet)
+  require(corpcor)
   syntax <- buildLavaanSyntax(model$varnames, model$lambda, model$theta, model$psi, ...) #build lavaan syntax for simulation
 
   #note that by default, the fitted models are provided only with a configural model on which free parameters are estimated
@@ -106,210 +107,114 @@ simCFAGraphs <- function(model, nreplications, n, graphmethods=c("EBICglasso", "
   outstruct$adjmats[["pearson"]]$average <- apply(outstruct$adjmats[["pearson"]]$concat, c(2,3), mean)
   
   cl <- makeCluster(4) #defaults to PSOCK cluster
-  clusterExport(cl, c("estimateNetwork"))#, "cd4.mle"))
+  #clusterExport(cl, c("estimateNetwork"))#, "cd4.mle"))
+  clusterExport(cl, c("cor_auto", "cor2pcor", "EBICglasso"))
   clusterEvalQ(cl, library(bootnet))
   clusterEvalQ(cl, library(qgraph))
+  clusterEvalQ(cl, library(igraph))
+  clusterEvalQ(cl, library(tidyr))
   
   on.exit(try(stopCluster(cl)))
   
   for (method in graphmethods) {
-    glist <- parLapply(cl, dlist, function(df) { estimateNetwork(df, default=method) })
-    
+    #achieve good speedup here using parLapply
+    glist <- parLapply(cl, dlist, function(df) {
+    #glist <- lapply(dlist, function(df) {
+          if (method=="EBICglasso") {
+            cmat <- cor_auto(df, detectOrdinal = TRUE, ordinalLevelMax = 7, missing = "pairwise")
+            adjmat <- EBICglasso(S=cmat, n=nrow(df), gamma=0.5, penalize.diagonal=FALSE, nlambda=100,
+                lambda.min.ratio = 0.01, returnAllResults = FALSE, checkPD = TRUE, 
+                countDiagonal = FALSE, refit = FALSE)
+          } else if (method=="pcor") {
+            cmat <- cor_auto(df, detectOrdinal = TRUE, ordinalLevelMax = 7, missing = "pairwise")
+            adjmat <- cor2pcor(cmat)
+            dimnames(adjmat) <- list(names(df), names(df)) #function drops the names
+          }
+          
+          gg <- igraph::graph_from_adjacency_matrix(adjmat, mode="undirected", weighted=TRUE, diag=FALSE)
+          return(gg)
+          
+          #estimateNetwork(df, default=method)
+        })
+
     outstruct$graphs[[method]] <- glist #save raw graphs into output
-    
+
     #concatenated and average adjacency matrices
-    outstruct$adjmats[[method]]$concat <- do.call(abind, list(lapply(glist, "[[", "graph"), along=0))
+    #use g[] notation to convert igraph to weighted matrix
+    outstruct$adjmats[[method]]$concat <- do.call(abind, list(lapply(glist, function(g) { as.matrix(g[]) }), along=0))
     outstruct$adjmats[[method]]$average <- apply(outstruct$adjmats[[method]]$concat, c(2,3), mean)
     outstruct$adjmats[[method]]$se <- apply(outstruct$adjmats[[method]]$concat, c(2,3), plotrix::std.error)
     
+    browser()
+    #compute centrality measures for each graph (just closeness, betweenness, and strength for now to match qgraph)
+    #parLapply does not help with speedup here (probably because igraph code is optimized and compiled)
+    system.time(Long <- lapply(1:length(glist), function(i) {
+          gg <- glist[[i]] #igraph object
+          E(gg)$weight <- abs(E(gg)$weight) #this is how qgraph solves negative edges (adopt for now)
+
+          ct <- data.frame(graphNum=i, node=V(gg)$name, 
+              closeness=closeness(gg, weights=1/E(gg)$weight, normalized=TRUE), #1/weight transformation because based on path-based distance metric
+              betweenness=betweenness(gg, weights=1/E(gg)$weight), #1/weight transformation to treat as distance function
+              strength=strength(gg), stringsAsFactors=FALSE)
+          ct %>% gather(measure, value, closeness, betweenness, strength)
+        }))
+    
     #compute centrality metrics (just the handful supported in bootnet)
-    Long <- parLapply(cl, 1:length(glist), function(g) { 
-          df <- centralityTable(glist[[g]], standardized=TRUE)
-          df$graphNum <- g; return(df) })
+    #Long <- parLapply(cl, 1:length(glist), function(g) { 
+    #      df <- centralityTable(glist[[g]], standardized=FALSE)
+    #      df$graphNum <- g; return(df) })
+
     LongAll <- do.call(rbind, Long) #includes metrics for all replications (for graphing means and variation/uncertainty
     
-    #browser()
-    
-    #manual calculation using igraph
-    #ct = centralityTable(glist[[1]], standardized=FALSE)
-    
-    #gg <- igraph::graph_from_adjacency_matrix(outstruct$adjmats[["EBICglasso"]]$concat[1,,], mode="undirected", weighted=TRUE, diag=FALSE)
-    #igraph::closeness(gg, normalized=TRUE) #blowing up igraph for unknown reasons
-    
-    #qgraph uses 1/correlation as weight, whereas igraph has to be specifically asked for this 
-    #igraph::betweenness(gg, normalized=FALSE, weights=1/igraph::E(gg)$weight) #, weights=NULL)
-    #centrality_auto(glist[[1]])$node.centrality
-    
-    #igraph::strength(gg)
-    #igraph::closeness(gg, normalized=FALSE, weights=1/igraph::E(gg)$weight)
-    #igraph::betweenness(gg, normalized=FALSE, weights=igraph::E(gg)$weight)
-    #cor(igraph::closeness(gg, normalized=FALSE), unlist(subset(ct, measure=="Closeness", select=value)))
-    #gg <- graph_from_adjacency_matrix(outstruct$adjmats[["pearson"]]$concat[1,,], mode="undirected", weighted=TRUE, diag=FALSE)
-    
-    #igraph::closeness(gg)
-    
-    #for some reason, pcor drops the "y" prefix
+    #cor2pcor drops dimnames of matrix. For estimateNetwork, need to add back "y" prefix
     #this will only work if the variables are named y<...>
-    if (method == "pcor") {
-      message("Adding missing 'y' prefix to node names for pcor")
-      LongAll$node <- paste0("y", LongAll$node) 
-    }
+    #if (method == "pcor") {
+    #  message("Adding missing 'y' prefix to node names for pcor")
+    #  LongAll$node <- paste0("y", LongAll$node) 
+    #}
     
-    browser()
     loadmaster <- data.frame(poploading=gdata::unmatrix(model$lambda, byrow=TRUE), 
-        factor=paste0(rep(dimnames(model$psi)[[1]], each=ncol(model$lambda)), "_poploading"), node=model$varnames, stringsAsFactors=FALSE)
+        factor=paste0(rep(dimnames(model$psi)[[1]], each=ncol(model$lambda)), "_poploading"), 
+        node=model$varnames, stringsAsFactors=FALSE)
     
     #convert loadings into wide format (columns named by factors)
     loadmaster <- loadmaster %>% tidyr::spread(key=factor, value=poploading)
-    
+
     LongAll <- inner_join(LongAll, loadmaster, by="node")
-        
-    #fitted_loadings <- select(sims[["simsemout"]]@coef, starts_with("f1=~"))
+
     fitted_loadings <- select(outstruct[["simsemout"]]@coef, matches("f\\d+=~"))
     fitted_loadings$graphNum <- 1:nrow(fitted_loadings)
-    #names(fitted_loadings) <- sub("f1=~", "", names(fitted_loadings), fixed=TRUE)
+
     wide_fitted <- tidyr::gather(fitted_loadings, key="node", value="fittedloading", -graphNum) %>%
         tidyr::separate(node, into=c("factor", "node"), sep="=~") %>% mutate(factor=paste0(factor, "_fittedloading")) %>%
         tidyr::spread(key=factor, value=fittedloading)
     
     LongAll <- inner_join(LongAll, wide_fitted, by=c("node", "graphNum"))
-    outstruct$gmetrics[[method]] <- LongAll #save centrality metrics into output
+    outstruct$gmetrics[[method]] <- LongAll #save centrality metrics into output with population and fitted loadings
     
+    #align centrality measures with factor loadings
     outstruct[["graph_v_factor"]][[method]]$metric_v_loadings <- LongAll %>% 
         gather(key=factor, value=loading, matches("f\\d+.*loading")) %>% # f1_poploading, f2_poploading, f1_fittedloading, f2_fittedloading) %>%
         separate(col=factor, into=c("factor", "loadingtype")) %>% 
         spread(key="loadingtype", value="loading") %>% filter(!is.na(poploading) & poploading != 0)
 
-    gg <- igraph::graph_from_adjacency_matrix(glist[[1]]$graph, mode="undirected", weighted=TRUE, diag=FALSE)
-    gg <- delete.edges(gg, which(E(gg)$weight < 0))
+    #debugging
+    #outstruct$graph_v_factor[[method]]$metric_v_loadings %>%
+    #    group_by(graphNum, measure, factor) %>% summarize(centsd=sd(value), loadsd=sd(fittedloading)) %>% 
+    #    filter(measure=="closeness") %>% arrange(desc(centsd))
     
-    ct <- centralityTable(glist[[1]], standardized=FALSE)
-    #ct <- centralityTable(gg, standardized=FALSE)
-    cor(igraph::strength(gg), subset(ct, measure=="Strength", select=value))
-    cor(igraph::closeness(gg, weights=1/E(gg)$weight), subset(ct, measure=="Closeness", select=value), use="pairwise.complete.obs")
-    cor(igraph::betweenness(gg, weights=1/E(gg)$weight), subset(ct, measure=="Betweenness", select=value), use="pairwise.complete.obs")
-    centrality_auto(glist[[1]])
-    centrality_auto(glist[[1]])
-    
-    
-    adjmat <- glist[[1]]$graph
-    weights <- adjmat[lower.tri(adjmat)]
-    length(weights[weights != 0])
-    igraph::closeness(gg, normalized=TRUE, weights=1/igraph::E(gg)$weight) #blowing up igraph for unknown reasons
-    igraph::betweenness(gg, normalized=FALSE, weights=1/E(gg)$weight) 
-    #qgraph uses 1/correlation as weight, whereas igraph has to be specifically asked for this 
-    #igraph::betweenness(gg, normalized=FALSE, weights=1/igraph::E(gg)$weight) #, weights=NULL)
-    #centrality_auto(glist[[1]])$node.centrality
-    
-    cmat <- cor_auto(dlist[[3]], detectOrdinal = FALSE)
-    EBICgraph <- qgraph(cmat, graph = "glasso", sampleSize = nrow(dlist[[1]]),
-        tuning = 0.5, layout = "spring", title = "BIC", details = TRUE)
-    
-    #this is the estimation function under the hood of estimateNetwork
-    tt = EBICglasso(S=cmat, n=nrow(dlist[[1]]), gamma=0.5, penalize.diagonal=FALSE, nlambda=100,
-        lambda.min.ratio = 0.01, returnAllResults = FALSE, checkPD = TRUE, 
-        countDiagonal = FALSE, refit = FALSE) #penalizeMatrix, 
-    
-    library(qgraph)
-    fromq <- as.igraph(EBICgraph)
-    s1 <- sort(E(fromq)$weight)
-    gg <- igraph::graph_from_adjacency_matrix(tt, mode="undirected", weighted=TRUE, diag=FALSE)
-    s2 <- sort(E(gg)$weight)
-    all.equal(s1, s2) #yes, these match.
-    
-    #for sanity, let's switch to igraph for everything after the network is estimated...
-    #gg <- delete.edges(gg, which(E(gg)$weight < 0))
-    E(gg)$weight <- abs(E(gg)$weight)
-    closeness(gg, weights=1/E(gg)$weight)
-    cor(betweenness(gg, weights=1/E(gg)$weight), centrality(EBICgraph, pkg="igraph")$Betweenness) #looks like qgraph is treating as directed? all values doubled wrt igraph
-
-    #so, this matches. CentralityTable standardizes (z-scores) all measures... unclear why closeness blows up
-    #look at the examples that are bad. dlist[[3]] in this iteration
-    cor(closeness(gg, weights=1/E(gg)$weight), centrality(EBICgraph, pkg="igraph")$Closeness)
-    betweenness(gg)
-    
-    
-    g2 <- estimateNetwork(dlist[[3]], default="EBICglasso")
-    identical(g2$graph, tt) #TRUE
-    
-    
+    #compute correlations between fitted loadings and node centrality
     outstruct$graph_v_factor[[method]]$corr_v_fitted <- outstruct$graph_v_factor[[method]]$metric_v_loadings %>%
         group_by(graphNum, measure, factor) %>% do({
-              if (all(is.na(.$value))) { browser("missing graph") }
-              tryCatch(sd(.$fittedloading) < .01 || sd(.$value), error=function(x) { browser()})
-              if (sd(.$fittedloading) < .01 || sd(.$value) < .01) { data.frame(cv=NA)
-              } else { data.frame(graphNum=.$graphNum[1], measure=.$measure[1], cv=cor(.$fittedloading, .$value)) } }) %>% #summarize(cv=cor(loading,value)) %>%
+              #beware of occasional lack of variation in correlation              
+              if (sd(.$fittedloading) < 1e-8 || sd(.$value) < 1e-3) { cv = NA } else { cv = cor(.$fittedloading, .$value) }
+              data.frame(graphNum=.$graphNum[1], measure=.$measure[1], cv=cv, stringsAsFactors=FALSE)
+            }) %>% #summarize(cv=cor(loading,value)) %>%
         group_by(measure, factor) %>% summarize(mcv=mean(cv, na.rm=TRUE))
     
   }
   
-  
-  
   return(outstruct)
-}
-
-##First demonstration: correlation of one-factor CFA loadings with centrality measures
-##a function to simulate multiple one-factor CFAs:
-## 10, 15, or 20 indicators
-## a basis for sampling loadings like uniform from seq(.4, .95, .05)
-## a number of replications for each setting.
-
-demo1 <- function(nexamples=2, nindicators=10, nreplications=200, n=400, loadingsampler=seq(.4, .95, .05), 
-    errorvars="eqresidvar", ivar=0.5, thetacorlist=NULL) {
-  # nexamples is the number of population factor models from which data are simulated and fit.
-  #   Each example draws a set of population factor loadings from the loadingsampler.
-  # nindicators is the number of indicators of the factor
-  # nreplications is the number of datasets drawn from the model
-  # n is the sample size
-  # loadingsampler is the set of population factor loadings that are drawn uniformly with replacement
-  # errorvars specifies whether to have equal item residual variance (eqresidvar) or equal observed variance
-  # ivar is the itevm variance (or residual variance)
-  #
-  require(dplyr)
-  require(tidyr)
-  require(matrixcalc)
-  
-  lapply(1:nexamples, function(i) {
-        lambda <- as.matrix(rbind(sample(loadingsampler, nindicators, replace=TRUE)))
-        varnames <- paste0("y", 1:ncol(lambda))
-        fvar <- 1.0 #factor variance (standardized)
-        if (errorvars=="eqresidvar") {
-          errorvars <- rep(ivar, length(varnames)) #fixed error specification          
-        } else if (errorvars=="eqvars") {
-          errorvars <- computeResidvar(targetitemvar=ivar, lambda, fvar=fvar) #compute item residual variances assuming equal observed variances          
-        }
-        
-        theta <- diag(as.vector(errorvars)) #0 resid cov by default
-        rownames(theta) <- colnames(theta) <- varnames #necessary for addErrorCor to work
-        
-        #thetacorlist contains an edge list specifying the residual correlation of two items
-        if (!is.null(thetacorlist)) {
-          for (pair in thetacorlist) {
-            theta <- addErrorCor(theta, unlist(pair[c(1,2)]), pair[[3]]) #positions 1 and 2 are the named nodes/items, 3 is the target correlation  
-          }
-        }
-        
-        if (!is.positive.definite(theta)) {
-          message("theta (error cov matrix) is not positive definite. Cannot continue")
-          print(theta)
-          return(NULL)
-        }
-        
-        psi <- diag(fvar) #zero covariance in factor structure at the moment
-        dimnames(psi) <- list(f=paste0("f", 1:nrow(psi)), f=paste0("f", 1:ncol(psi)))
-        
-        #model specification structure. Currently just wrapping up individual arguments above into a list
-        m <- list(
-            varnames=varnames, #vector of variable names
-            lambda=lambda, #nitems x nfactors loadings matrix
-            theta=theta, #covariance (residual) matrix for observed items
-            psi=psi #covariance matrix for factors
-        )
-        
-        sims <- simCFAGraphs(m, nreplications=nreplications, n=n)
-                
-        return(sims)
-      })
 }
 
 
@@ -418,7 +323,9 @@ demomaster <- function(nexamples=2, nindicators=20, nfactors=2, nreplications=20
         if (errorvars=="eqresidvar") {
           errorvars <- rep(ivar, length(varnames)) #fixed error specification          
         } else if (errorvars=="eqvars") {
-          errorvars <- computeResidvar(targetitemvar=ivar, lambda, fvar=fvar) #compute item residual variances assuming equal observed variances          
+          #compute item residual variances assuming equal observed variances
+          #note that we should be worried if ivar != 1.0 in a standardized solution because it can easily given negative variances
+          errorvars <- computeResidvar(targetitemvar=ivar, lambda, fvar=fvar)          
         }
         
         diag(theta) <- as.vector(errorvars) #0 resid cov by default
