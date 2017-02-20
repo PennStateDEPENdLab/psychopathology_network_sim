@@ -80,17 +80,25 @@ buildLavaanSyntax <- function(varnames, lambda, theta, psi, psistart=FALSE, thet
   return(list(simsyntax=paste(syntax, collapse="\n"), fitsyntax=paste(fitsyntax, collapse="\n")))
 }
 
-simCFAGraphs <- function(model, nreplications, n, graphmethods=c("EBICglasso", "pcor"), ...) { #, "IsingFit"
+simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EBICglasso", "pcor"), ...) { #, "IsingFit"
   require(simsem)
   require(parallel)
   require(abind)
   require(bootnet)
   require(corpcor)
+  require(doParallel)
+  require(igraph)
+  require(tidyr)
   syntax <- buildLavaanSyntax(model$varnames, model$lambda, model$theta, model$psi, ...) #build lavaan syntax for simulation
 
   #note that by default, the fitted models are provided only with a configural model on which free parameters are estimated
+  
+  #randomize seed
+  mySeed = as.POSIXlt(Sys.time())
+  mySeed = 1000*(mySeed$hour*3600 + mySeed$min*60 + mySeed$sec)
+  
   simStruct <- simsem::sim(nRep=nreplications, model=syntax$fitsyntax, n=n, generate=syntax$simsyntax, 
-      lavaanfun = "cfa", outfundata=savedat, multicore=FALSE) #TRUE)
+      lavaanfun = "cfa", outfundata=savedat, multicore=FALSE, seed=mySeed) #TRUE)
   
   #obtain raw simulated data for network analysis
   dlist <- getExtraOutput(simStruct) #only seems to work with convergence of estimated model?
@@ -106,20 +114,29 @@ simCFAGraphs <- function(model, nreplications, n, graphmethods=c("EBICglasso", "
   outstruct$adjmats[["pearson"]]$concat <- do.call(abind, list(lapply(outstruct$simdata, function(df) { cor(df) }), along=0))
   outstruct$adjmats[["pearson"]]$average <- apply(outstruct$adjmats[["pearson"]]$concat, c(2,3), mean)
   
-  cl <- makeCluster(4) #defaults to PSOCK cluster
-  #clusterExport(cl, c("estimateNetwork"))#, "cd4.mle"))
-  clusterExport(cl, c("cor_auto", "cor2pcor", "EBICglasso"))
-  clusterEvalQ(cl, library(bootnet))
-  clusterEvalQ(cl, library(qgraph))
-  clusterEvalQ(cl, library(igraph))
-  clusterEvalQ(cl, library(tidyr))
-  
-  on.exit(try(stopCluster(cl)))
+  #switch away from parLapply because it doesn't easily allow for serial execution, which is important if parallelism is in outer loop
+  if (!is.null(parallel) && parallel > 0) {
+    cl <- makeCluster(parallel) #defaults to PSOCK cluster
+    #clusterExport(cl, c("estimateNetwork"))#, "cd4.mle"))
+    clusterExport(cl, c("cor_auto", "cor2pcor", "EBICglasso"))
+    clusterEvalQ(cl, library(bootnet))
+    clusterEvalQ(cl, library(qgraph))
+    clusterEvalQ(cl, library(igraph))
+    clusterEvalQ(cl, library(tidyr))
+    
+    registerDoParallel(cl)
+    
+    on.exit(try(stopCluster(cl)))
+    `%op%` <- `%dopar%` #https://stat.ethz.ch/pipermail/r-sig-hpc/2013-January/001575.html
+  } else {
+    #removed the doseq backend so that a parent function can be made parallel without overriding the registered backend
+    #registerDoSEQ() #formally register sequential backend
+    `%op%` <- `%do%`
+  }
   
   for (method in graphmethods) {
-    #achieve good speedup here using parLapply
-    glist <- parLapply(cl, dlist, function(df) {
-    #glist <- lapply(dlist, function(df) {
+    #achieve good speedup here using parallel execution
+    glist <- foreach(df=dlist, .packages=c("qgraph", "igraph", "tidyr")) %op% {
           if (method=="EBICglasso") {
             cmat <- cor_auto(df, detectOrdinal = TRUE, ordinalLevelMax = 7, missing = "pairwise")
             adjmat <- EBICglasso(S=cmat, n=nrow(df), gamma=0.5, penalize.diagonal=FALSE, nlambda=100,
@@ -135,7 +152,7 @@ simCFAGraphs <- function(model, nreplications, n, graphmethods=c("EBICglasso", "
           return(gg)
           
           #estimateNetwork(df, default=method)
-        })
+        }
 
     outstruct$graphs[[method]] <- glist #save raw graphs into output
 
@@ -145,10 +162,9 @@ simCFAGraphs <- function(model, nreplications, n, graphmethods=c("EBICglasso", "
     outstruct$adjmats[[method]]$average <- apply(outstruct$adjmats[[method]]$concat, c(2,3), mean)
     outstruct$adjmats[[method]]$se <- apply(outstruct$adjmats[[method]]$concat, c(2,3), plotrix::std.error)
     
-    browser()
     #compute centrality measures for each graph (just closeness, betweenness, and strength for now to match qgraph)
     #parLapply does not help with speedup here (probably because igraph code is optimized and compiled)
-    system.time(Long <- lapply(1:length(glist), function(i) {
+    Long <- lapply(1:length(glist), function(i) {
           gg <- glist[[i]] #igraph object
           E(gg)$weight <- abs(E(gg)$weight) #this is how qgraph solves negative edges (adopt for now)
 
@@ -157,7 +173,7 @@ simCFAGraphs <- function(model, nreplications, n, graphmethods=c("EBICglasso", "
               betweenness=betweenness(gg, weights=1/E(gg)$weight), #1/weight transformation to treat as distance function
               strength=strength(gg), stringsAsFactors=FALSE)
           ct %>% gather(measure, value, closeness, betweenness, strength)
-        }))
+        })
     
     #compute centrality metrics (just the handful supported in bootnet)
     #Long <- parLapply(cl, 1:length(glist), function(g) { 
@@ -190,6 +206,38 @@ simCFAGraphs <- function(model, nreplications, n, graphmethods=c("EBICglasso", "
         tidyr::spread(key=factor, value=fittedloading)
     
     LongAll <- inner_join(LongAll, wide_fitted, by=c("node", "graphNum"))
+    
+    #merge population and fitted residual correlations in theta to the centrality data.frame
+    coefnames <- strsplit(names(outstruct[["simsemout"]]@coef), "~~|=~")
+    stopifnot(all(sapply(coefnames, length) == 2))
+    coefnames <- data.frame(do.call(rbind, coefnames), stringsAsFactors=FALSE)
+    rpos <- with(coefnames, which(substr(X1, 1, 1)=="y" & substr(X2, 1, 1)=="y" & X1 != X2)) #filter(residcov, substr(X1, 1, 1)=="y" & substr(X2, 1, 1)=="y" & X1 != X2) 
+
+    if (length(rpos) > 0L) {
+      #populate residual covariance structure
+      residcov <- outstruct[["simsemout"]]@coef[,rpos, drop=F]
+      residlist <- list()
+      
+      #want to have a structure that looks like
+      #graphNum node rvar rcorr_pop rcorr_fitted
+      #       1   y1   y9      0.55         0.52
+      #       2   y1   y9      0.55         0.59
+      #       1   y9   y1      0.55         0.52
+      #       2   y9   y1      0.55         0.59
+      
+      for (i in 1:length(rpos)) {
+        pv <- model$theta[coefnames[rpos[i],1], coefnames[rpos[i],2]] #population value
+        residlist[[i]] <- rbind(
+            data.frame(node=coefnames[rpos[i],1], rvar=coefnames[rpos[i],2], rcorr_pop=pv, rcorr_fitted=residcov[,i], graphNum=1:nrow(residcov), stringsAsFactors=FALSE),
+            data.frame(node=coefnames[rpos[i],2], rvar=coefnames[rpos[i],1], rcorr_pop=pv, rcorr_fitted=residcov[,i], graphNum=1:nrow(residcov), stringsAsFactors=FALSE)
+        )
+      }
+      residcov <- do.call(rbind, residlist)
+      
+      #left join because residcov will only affect a select few nodes, NAs populated elsewhere
+      LongAll <- left_join(LongAll, residcov, by=c("node", "graphNum"))  
+    }
+    
     outstruct$gmetrics[[method]] <- LongAll #save centrality metrics into output with population and fitted loadings
     
     #align centrality measures with factor loadings
@@ -267,6 +315,10 @@ demomaster <- function(nexamples=2, nindicators=20, nfactors=2, nreplications=20
       randomloadings <- FALSE
       for (i in 1:nfactors) {
         lambda[i,(i-1)*perfactor + 1:perfactor] <- loadings
+      }
+    } else {
+      for (i in 1:nfactors) {
+        lambda[i,(i-1)*perfactor + 1:perfactor] <- 0.5 #just a dummy here to make the cross-loadings code work. This will be overridden in the randomization within replications
       }
     }
   }

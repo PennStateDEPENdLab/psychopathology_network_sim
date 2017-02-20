@@ -19,6 +19,18 @@ x <- demomaster(nexamples=1, nindicators=24, nfactors=1, nreplications=200, n=40
 x <- demomaster(nexamples=1, nindicators=24, nfactors=1, nreplications=200, n=400, 
     errorvars="eqvars", ivar=1, thetacorlist=NULL)
 
+x[[1]]$graph_v_factor$EBICglasso$corr_v_fitted
+
+#does transforming betweenness linearize/increase the correlation? Scatterplots suggest a nonlinear relationship
+#yes... and this is supported in some literature: https://books.google.com/books?id=rbxPm93PRY8C&pg=PA175&lpg=PA175&dq=transform+betweenness+log&source=bl&ots=Mxly7a-oJ4&sig=Ulo6OCupLaWJU25gT6Y7jbPCsdY&hl=en&sa=X&ved=0ahUKEwj8i6nKjurQAhUN92MKHegwAyEQ6AEIHDAA#v=onepage&q=transform%20betweenness%20log&f=false
+with(filter(x[[1]]$graph_v_factor$EBICglasso$metric_v_loadings, measure=="betweenness"),
+    cor(fittedloading, log10(value + 1.1)*100))
+
+with(filter(x[[1]]$graph_v_factor$EBICglasso$metric_v_loadings, measure=="betweenness"),
+    cor(fittedloading, value, method="spearman"))
+
+filter(x[[1]]$graph_v_factor$EBICglasso$metric_v_loadings, measure=="betweenness") %>%
+    ggplot(aes(x=log10(value+1.1)*100, y=fittedloading)) + geom_point() + stat_smooth() #+ scale_x_log2()
 
 #MNH Nov2016: checked whether demomaster supersedes demo1. yes, confirmed that all data structures and results are identical
 ##First demonstration: correlation of one-factor CFA loadings with centrality measures
@@ -28,6 +40,10 @@ dd <- demomaster(nexamples=2, nindicators=10, nfactors=1, nreplications=200, n=4
 
 dd[[1]]$graph_v_factor$EBICglasso$corr_v_fitted
 dd[[2]]$graph_v_factor$EBICglasso$corr_v_fitted
+
+dd[[1]]$graph_v_factor$pcor$corr_v_fitted
+dd[[2]]$graph_v_factor$pcor$corr_v_fitted
+
 
 
 #save(file="psychopathology_networks_demo1_4Nov2016.RData", dd)
