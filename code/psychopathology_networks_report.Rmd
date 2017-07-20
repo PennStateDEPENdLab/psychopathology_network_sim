@@ -1,15 +1,17 @@
 ---
-title: "Network analyses of psychopathology in cross-section: conceptual and statistical challenges from a latent variable perspective"
+title: 'Network analyses of psychopathology in cross-section: conceptual and statistical
+  challenges from a latent variable perspective'
 author: "Michael Hallquist, Aidan Wright, & Peter Molenaar"
 date: "2/20/2017"
 output:
   html_document:
-    toc: true
     theme: spacelab
+    toc: yes
   html_notebook:
-    toc: true
     theme: spacelab
-  pdf_document: default
+    toc: yes
+  pdf_document:
+    toc: yes
 ---
 
 ```{r setup, include=FALSE}
@@ -17,14 +19,15 @@ options(width = 100)
 rd <- file.path(getMainDir(), "psychopathology_network_sim")
 if (!require(pacman)) { install.packages("pacman"); library(pacman) }
 p_load(knitr, dplyr, ggplot2, tidyr, cowplot, simsem, bootnet, 
-       qgraph, abind, foreach, doParallel, pander)
+       qgraph, abind, foreach, doParallel, pander, viridis)
 knitr::opts_chunk$set(echo = TRUE)
 knitr::opts_knit$set(root.dir = rd)
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
 panderOptions("digits", 3)
 source(file.path(rd, "code/psychopathology_sim_functions.R"))
 ```
 
-This document provides initial scaffolding for a conceptual critique of cross-sectional network approaches to psychopathology symptom data. In particular, we articulate the view that structural equation modeling (SEM) provides a statistical formalism that can accomodate a range of covariance structures, largely encompassing networks and also allowing one to examine alternative representations of latent structure. To highlight that nodal centrality metrics largely recapitulate free parameters in SEM, we conduct a series of simulations of latent variable models analyzed using a network approach, as well as simulated networks analyzed through latent variable models. We highlight conceptual and quantitative limitations of the network approach for resolving the latent structure of psychopathology and argue that principled model selection and comparison in SEM provides a strong basis for resolving alternative accounts of how symptoms covary with each other.
+This document provides initial scaffolding for a conceptual critique of cross-sectional network approaches to psychopathology symptom data. In particular, we articulate the view that structural equation modeling (SEM) provides a statistical formalism that can accommodate a range of covariance structures, largely encompassing networks and also allowing one to examine alternative representations of latent structure. To highlight that nodal centrality metrics largely recapitulate free parameters in SEM, we conduct a series of simulations of latent variable models analyzed using a network approach, as well as simulated networks analyzed through latent variable models. We highlight conceptual and quantitative limitations of the network approach for resolving the latent structure of psychopathology and argue that principled model selection and comparison in SEM provides a strong basis for resolving alternative accounts of how symptoms covary with each other.
 
 [[A point of some convergence is the recent Epskamp Psychometrika paper that blends latent variables and networks. This allows one to consider measurement error, to measure/test a hypothetical construct, and to compare model fit of a GGM against a SEM directly (i.e., same likelihood function). I suggest we include a summary of this later in the paper as a rapprochement and to highlight this as a promising direction.]]
 
@@ -135,7 +138,8 @@ All simulated data in this section are generated from confirmatory factor models
 ## Hypothesis 1 simulations: strength is redundant with factor loadings
 
 H1: In factor models with simple structure, strength centrality (or degree for binarized networks) will be redundant with factor loadings.
-  * H1a: In one-factor models with simple structure, closeness centrality will be redundant with factor loadings. Closeness measures the average length of the          shortest path between a target node and all other nodes in the graph.
+
+  * H1a: In one-factor models with simple structure, closeness centrality will be redundant with factor loadings. Closeness measures the average length of the shortest path between a target node and all other nodes in the graph.
   * H1b: The relationship between strength centrality and factor
     loadings will not diminish as the number of factors increases because
     strength is concerned with the summed connection magnitude and is not
@@ -173,6 +177,42 @@ kable(corrvgraph_glasso %>% group_by(measure, factor) %>% summarize_all(funs(mea
       digits=2, caption = "Association of GLASSO graph measures with 1-factor CFA loadings")
 kable(corrvgraph_pcor %>% group_by(measure, factor) %>% summarize_all(funs(mean, sd)), 
       digits=2, caption = "Association of PCOR graph measures with 1-factor CFA loadings")
+
+smat <- do.call(rbind, lapply(dd, function(rep) {
+  brep <- filter(rep$graph_v_factor$EBICglasso$metric_v_loadings, node=="y1" & measure=="strength" &
+                   fittedloading < 1)
+}))
+
+smat$graphNum <- rep(1:(nrow(smat)/2), each=2) #smat has two rows per replication. Need to identify these to get the spread to work properly
+
+bb <- smat %>% select(graphNum, value, factor, fittedloading) %>% spread(key=factor, value=fittedloading) #graphNum
+g <- ggplot(bb, aes(x=f1, y=value)) + geom_point(alpha=0.5) + stat_smooth(method="lm") + xlab("Fitted factor loading") +
+  ylab("Strength centrality") + annotate(geom="text", x = 0.4, y=1.1, label="r = 0.97") +theme_cowplot(font_size=20)
+
+pdf("strength 1-factor loadings.pdf", width=5, height=4)
+plot(g)
+dev.off()
+
+
+kable(
+  broom::tidy(cor.test(~ fittedloading + value, filter(smat, factor=="f1"))), 
+  digits=2, caption="Association of strength with primary factor loading (f1)")
+
+
+cmat <- do.call(rbind, lapply(dd, function(rep) {
+  brep <- filter(rep$graph_v_factor$EBICglasso$metric_v_loadings, node=="y1" & measure=="closeness" &
+                   fittedloading < 1)
+}))
+
+cmat$graphNum <- rep(1:(nrow(cmat)/2), each=2) #smat has two rows per replication. Need to identify these to get the spread to work properly
+
+bb <- cmat %>% select(graphNum, value, factor, fittedloading) %>% spread(key=factor, value=fittedloading) #graphNum
+g <- ggplot(bb, aes(x=f1, y=value)) + geom_point(alpha=0.3) + stat_smooth(method="lm") + xlab("Fitted factor loading") + ylab("Closeness centrality") + annotate(geom="text", x = 0.4, y=0.15, label="r = 0.96") +
+  theme_cowplot(font_size=20)
+pdf("closeness 1-factor loadings.pdf", width=5, height=4)
+plot(g)
+dev.off()
+
 ```
 
 ### Two-factor simulation
@@ -199,12 +239,27 @@ kable(corrvgraph_pcor %>% group_by(measure, factor) %>% summarize_all(funs(mean,
       digits=2, caption = "Association of PCOR graph measures with 2-factor CFA loadings")
 ```
 
+```{r dependson="sim_2fac", echo=FALSE}
+smat <- do.call(rbind, lapply(dd2, function(rep) {
+  brep <- filter(rep$graph_v_factor$EBICglasso$metric_v_loadings, node=="y2" & measure=="strength")
+}))
+
+smat$graphNum <- rep(1:(nrow(smat)/2), each=2) #smat has two rows per replication. Need to identify these to get the spread to work properly
+
+bb <- smat %>% select(graphNum, value, factor, fittedloading) %>% spread(key=factor, value=fittedloading) #graphNum
+ggplot(bb, aes(x=f1, y=value)) + geom_point() + stat_smooth()
+kable(
+  broom::tidy(cor.test(~ fittedloading + value, filter(smat, factor=="f1"))), 
+  digits=2, caption="Association of strength with primary factor loading (f1)")
+
+```
+
 ## Hypothesis 2: Centrality metrics will capture the joint magnitude of cross-loadings in 2+ factor CFA violating simple structure
 
 H2: In a 2-factor (or larger) structure, a cross-loading will tend to increase the centrality of that variable in proportion to the joint magnitude of
 its factor loadings. This highlights a limitation of network analyses in that multiple causes are not accommodated.
 
-For the first simulation, we specify a 2-factor model (9 per factor) with fixed 0.6 loadings. Items y1-y9 loading onto f1, and y10-y18 load onto f2. We then randomly vary the magnitude of a cross-loading of y2 onto f2. 200 replications of this structure with *N*=400 are simulated.
+For the first simulation, we specify a 2-factor model (9 per factor) with fixed 0.6 loadings. Items y1-y9 loading onto f1, and y10-y18 load onto f2. We then randomly vary the magnitude of a cross-loading of y2 onto f2. 500 replications of this structure with *N*=400 are simulated.
 
 ```{r sim_2fac_cross, cache=TRUE, include=FALSE}
 ##need to lock in a given factor structure, then vary the cross-loading magnitude.
@@ -233,16 +288,16 @@ model1 <- list(
     psi=psi #covariance matrix for factors
 )
 
-#add one cross-loading in 200 replications
+#add one cross-loading in 500 replications
 cl <- makeCluster(8) #defaults to PSOCK cluster
 clusterExport(cl, c("simCFAGraphs"))
 
 registerDoParallel(cl)
 clusterEvalQ(cl, library(dplyr)) #load dplyr in all workers
-mlist <- foreach(i=1:200) %dopar% {
+mlist <- foreach(i=1:500) %dopar% {
       mm <- model1
       mm$lambda[2, 2] <- runif(1, 0.2, 0.8) #add cross-loading of y2 onto f2
-      sims <- simCFAGraphs(mm, nreplications=1, n=400, thetastart=TRUE, parallel=0)
+      sims <- simCFAGraphs(mm, nreplications=5, n=400, thetastart=TRUE, parallel=0)
       return(sims)
 }
 stopCluster(cl)
@@ -286,6 +341,7 @@ bb <- bmat %>% select(graphNum, value, factor, fittedloading) %>% spread(key=fac
 ```
 
 Correlation of fitted loading with secondary factor (runif 0.2--0.8)
+
 ```{r dependson="sim_2fac_cross", echo=FALSE}
 #correlation of node betweenness and core factor
 kable(broom::tidy(cor.test(~ fittedloading + value, filter(bmat, factor=="f2"))),
@@ -303,6 +359,7 @@ pander(summary(lm(value ~ f1 + f2, bb)))
 The magnitude of the cross-loading does strongly influence the closeness centrality of the target node y2.
 
 Correlation of closeness with fitted primary factor loading (loading varies ~0.6)
+
 ```{r dependson="sim_2fac_cross", echo=FALSE, message=FALSE}
 #correlation of node betweenness and core factor
 kable(broom::tidy(cor.test(~ fittedloading + value, filter(cmat, factor=="f1"))),
@@ -311,8 +368,9 @@ kable(broom::tidy(cor.test(~ fittedloading + value, filter(cmat, factor=="f1")))
 bb <- cmat %>% select(graphNum, value, factor, fittedloading) %>% spread(key=factor, value=fittedloading) #graphNum contains the identifying column
 #ggplot(bb, aes(x=f1, y=value)) + geom_point() + stat_smooth()
 ```
-<br>
+
 Correlation of closeness with fitted secondary factor loading (runif 0.2--0.8)
+
 ```{r dependson="sim_2fac_cross", echo=FALSE}
 #correlation of node betweenness and core factor
 kable(broom::tidy(cor.test(~ fittedloading + value, filter(cmat, factor=="f2"))),
@@ -328,6 +386,7 @@ pander(summary(lm(value ~ f1 + f2, bb)))
 
 ### Strength centrality
 Correlation of strength with fitted primary factor loading (loading varies ~0.6)
+
 ```{r dependson="sim_2fac_cross"}
 #correlation of node betweenness and core factor
 broom::tidy(cor.test(~ fittedloading + value, filter(smat, factor=="f1")))
@@ -337,6 +396,7 @@ bb <- smat %>% select(graphNum, value, factor, fittedloading) %>% spread(key=fac
 ```
 
 Correlation of fitted loading with secondary factor (runif 0.2--0.8)
+
 ```{r dependson="sim_2fac_cross", echo=FALSE}
 #correlation of node betweenness and core factor
 kable(broom::tidy(cor.test(~ fittedloading + value, filter(smat, factor=="f2"))),
@@ -392,7 +452,7 @@ mlist_rand <- foreach(i=iter(loading_grid, by='row')) %dopar% {
       mm <- model1
       mm$lambda[1, 2] <- i$f1 #runif(1, 0.2, 0.8) #random loading of y2 onto f1
       mm$lambda[2, 2] <- i$f2  #runif(1, 0.2, 0.8) #random loading of y2 onto f2
-      sims <- simCFAGraphs(mm, nreplications=5, n=400, thetastart=TRUE, parallel=0)
+      sims <- simCFAGraphs(mm, nreplications=20, n=400, thetastart=TRUE, parallel=0)
       return(sims)
 }
 stopCluster(cl)
@@ -401,6 +461,7 @@ stopCluster(cl)
 ```{r cross_rand_stats, dependson="sim_2fac_cross_rand", include=FALSE, cache=TRUE}
 #will return a data.frame with betweenness for y2 (cross-loaded item) and the population
 #and fitted loadings for both factors
+
 bmat_rand <- do.call(rbind, lapply(mlist_rand, function(rep) {
   brep <- filter(rep$graph_v_factor$EBICglasso$metric_v_loadings, node=="y2" & measure=="betweenness")
 }))
@@ -459,14 +520,24 @@ kable(broom::tidy(cor.test(~ fittedloading + value, filter(cmat_rand, factor=="f
 kable(broom::tidy(cor.test(~ fittedloading + value, filter(smat_rand, factor=="f2"))), digits=2, caption="Correlation of strength with f2 fitted loading")
 kable(broom::tidy(cor.test(~ fittedloading + value, filter(smat_rand, factor=="f1"))), digits=2, caption="Correlation of strenght with f1 fitted loading")
 
-bb_rand <- smat_rand %>% select(graphNum, value, factor, fittedloading) %>% spread(key=factor, value=fittedloading)
-#bb_rand <- smat_rand %>% select(graphNum, value, factor, poploading) %>% spread(key=factor, value=poploading) #graphNum contains the identifying column
+#bb_rand <- smat_rand %>% select(graphNum, value, factor, fittedloading) %>% spread(key=factor, value=fittedloading)
+bb_rand <- smat_rand %>% select(graphNum, value, factor, poploading) %>% spread(key=factor, value=poploading) #graphNum contains the identifying column
 #ggplot(bb_rand, aes(x=f1, y=value)) + geom_point() + stat_smooth()
 pander(summary(lm(value ~ f1 + f2, bb_rand))) #so measure becomes hugely predicted by each loading
 
+#aggregate replications within each combination of f1 and f2loading
+bbagg <- bb_rand %>% group_by(f1, f2) %>% summarize(value=mean(value))
+
 #3d plot of sorts
-ggplot(bb_rand, aes(x=f1, y=f2, color=value)) + geom_jitter(size=3, position = position_jitter(width=0.03, height=0.03)) + scale_color_gradient() + 
-  ggtitle("Association of f1 (x) and f2 (y) loadings with strength centrality (color)")
+pdf("strength f1f2.pdf", width=7, height=5)
+ggplot(bbagg, aes(x=f1, y=f2, fill=value)) + geom_tile() +
+  #scale_color_gradient() + 
+  scale_fill_viridis("Strength", option="viridis") +
+  xlab("Factor 1 loading") + ylab("Factor 2 loading") +
+  theme_cowplot(font_size=20)
+  #ggtitle("Association of f1 (x) and f2 (y) loadings with strength (color)")
+dev.off()
+#geom_jitter(size=3, position = position_jitter(width=0.03, height=0.03)) + 
 ```
 
 
@@ -542,3 +613,291 @@ An important consideration that is unexplored in these initial simulations is th
 *Disproportionate influence of residual associations in the presence of positive manifold.* This is largely a problem of the partial correlation/precision idea.
 
 *Considerations of subgraph structure.* Metrics are often reported blind to the idea of subgraphs, network experts rarely overlook considerations of modularity, connected components, and so on. This pulls us back toward factor models vs. community detection, which is another parallel
+
+## Hypothesis: GLASSO or PCOR will overemphasize unique associations to the exclusion of commonality
+
+So, we need to basically parametrically manipulate the amount of variation explained by a latent variable versus a unique bivariate association.
+
+The cleanest example might be a 2-factor structure with a single residual association across factors. Does the relative magnitude of this association scale with the strength of the GLASSO edge?
+
+Or maybe even a 1-factor structure with a residual association. Does it look dramatically different from a one-factor model?
+
+
+
+```{r sim_2fac_eqvar, cache=TRUE, include=FALSE}
+##need to lock in a given factor structure, then vary the cross-loading magnitude.
+
+#consistent 2-factor structure
+
+#goal is to maintain equal item variance, but explain different proportions of that variance according to
+# factor loadings... So basically hold constant prop var at certain tiers, but vary which factor explains it.
+
+#what if we use an R2 of 60%?
+r2 <- .64
+
+lambda <- as.matrix(rbind(
+        c(rep(sqrt(r2), 9), rep(0, 9)), #f1
+        c(rep(0, 9), rep(sqrt(r2), 9)))) #f2
+
+varnames <- paste0("y", 1:ncol(lambda))
+
+fvar <- c(1.0, 1.0) #factor variance (standardized)
+#errorvars <- rep(0.3, ncol(lambda)) #fixed error specification
+errorvars <- computeResidvar(targetitemvar=1.0, lambda, fvar=fvar) #compute item residual variances assuming equal observed variances 
+theta <- diag(as.vector(errorvars)) #0 resid cov initially
+rownames(theta) <- colnames(theta) <- varnames #necessary for addErrorCor to work
+
+psi <- diag(fvar) #zero covariance in factor structure at the moment
+dimnames(psi) <- list(f=paste0("f", 1:nrow(psi)), f=paste0("f", 1:ncol(psi)))
+
+#model specification structure. Currently just wrapping up individual arguments above into a list
+model1 <- list(
+    varnames=varnames, #vector of variable names
+    lambda=lambda, #nitems x nfactors loadings matrix
+    theta=theta, #covariance (residual) matrix for observed items
+    psi=psi #covariance matrix for factors
+)
+
+cl <- makeCluster(8) #defaults to PSOCK cluster
+clusterExport(cl, c("simCFAGraphs"))
+
+registerDoParallel(cl)
+clusterEvalQ(cl, library(dplyr)) #load dplyr in all workers
+
+#f1loading <- seq(0.15, 0.80, .01)
+#f2loading <- sqrt(r2 - f1loading^2 + .Machine$double.eps) #to avoid slightly negative numbers
+#f1loading^2 + f2loading^2
+
+#rework the loading grid to be in step size of variance explained .01 increment
+f1loading <- sqrt(seq(0, .64, .01))
+f2loading <- sqrt(r2 - f1loading^2 + .Machine$double.eps)
+#f1loading^2 + f2loading^2
+loading_grid <- data.frame(f1loading, f2loading)
+
+#plot(loading_grid$f1loading)
+
+mlist_rand <- foreach(i=iter(loading_grid, by='row')) %dopar% {
+      mm <- model1
+      mm$lambda[1, 2] <- i$f1 #runif(1, 0.2, 0.8) #random loading of y2 onto f1
+      mm$lambda[2, 2] <- i$f2  #runif(1, 0.2, 0.8) #random loading of y2 onto f2
+      sims <- simCFAGraphs(mm, nreplications=50, n=400, thetastart=TRUE, parallel=0)
+      return(sims)
+}
+stopCluster(cl)
+
+
+#mlist_rand[[10]]$graph_v_factor$EBICglasso$metric_v_loadings
+
+ebicall <- do.call(rbind, lapply(1:length(mlist_rand), function(g) { 
+  df <- subset(mlist_rand[[g]]$graph_v_factor$EBICglasso$corr_v_fitted, measure=="strength") #%>%
+    #spread(key=factor, value=mcv)
+  #browser()
+  df$f1loading <- loading_grid[g, 1]
+  df$f2loading <- loading_grid[g, 2]
+  df
+}))
+
+#ggplot(ebicall, aes(x=f1loading, y=f2loading, color=mcv)) + geom_point() + facet_wrap(~factor)
+library(viridis)
+pdf("/Users/michael/Documents/fload.pdf", width=12, height=12)
+ggplot(ebicall, aes(x=f1loading^2, y=f2loading^2, color=mcv)) + geom_point() + facet_wrap(~factor) +
+  scale_color_viridis("magma")
+dev.off()
+#so now, we look at the extent to which centrality and primary factor loading are associated.
+#we should see centrality redundancy with factor loadings falling apart as cross-loading increases.
+#is this 
+
+```
+
+On further reflection, the approach above of varying the cross-loading magnitude in terms of percent variance is a relatively useful, but redundant, extension of the cross-loading example above (that multiple causes cannot be accommodated). What we really need is a true shared variance versus unique cause situation.
+
+I think this is probably cleanest through a two-factor CFA with an additional factor that scales the unique association of two items.
+
+TODO: What happens if factors start to correlate? Do we start to overvalue cross-factor associations over within-factor associations? This would be the broadband prediction of the partial correlation failure notion.
+
+```{r fixedvar_cross, cache=TRUE, include=FALSE}
+#what if we use an R2 of 64%?
+r2 <- .64
+perfac <- 10
+# lambda <- as.matrix(rbind(
+#         c(rep(sqrt(r2), perfac), rep(0, perfac*2)), #f1
+#         c(rep(0, perfac), rep(sqrt(r2), perfac), rep(0, perfac)),  #f2
+#         c(rep(0, perfac*2), rep(sqrt(r2), perfac)),  #f3
+#         c(rep(0, perfac*3)))) #u
+
+# lambda <- as.matrix(rbind(
+#         c(rep(sqrt(r2), perfac), rep(0, perfac + 1)), #f1
+#         c(rep(0, perfac), rep(sqrt(r2), perfac), 0),  #f2
+#         c(rep(0, perfac*2), 0.8))) #u with one fixed loading of 0.8
+
+lambda <- as.matrix(rbind(
+        c(rep(sqrt(r2), perfac), rep(0, perfac)), #f1
+        c(rep(0, perfac), rep(sqrt(r2), perfac)),  #f2
+        c(rep(0, perfac*2)))) #u
+
+lambdaconstraint <- matrix(0, nrow=nrow(lambda), ncol=ncol(lambda))
+lambdaconstraint[3, c(2,11)] <- 1 #constrain these loadings to equality in fitting (loading matrix contains integer identifiers for equated params)
+varnames <- paste0("y", 1:ncol(lambda))
+
+fvar <- c(1.0, 1.0, 1.0) #factor variance (standardized)
+#errorvars <- rep(0.3, ncol(lambda)) #fixed error specification
+errorvars <- computeResidvar(targetitemvar=1.0, lambda, fvar=fvar) #compute item residual variances assuming equal observed variances 
+theta <- diag(as.vector(errorvars)) #0 resid cov initially
+rownames(theta) <- colnames(theta) <- varnames #necessary for addErrorCor to work
+
+psi <- diag(fvar) #zero covariance in factor structure at the moment
+dimnames(psi) <- list(f=paste0("f", 1:nrow(psi)), f=paste0("f", 1:ncol(psi)))
+
+#model specification structure. Currently just wrapping up individual arguments above into a list
+model1 <- list(
+    varnames=varnames, #vector of variable names
+    lambda=lambda, #nitems x nfactors loadings matrix
+    lambdaconstraint=lambdaconstraint, #constraint matrix for factor loadings
+    theta=theta, #covariance (residual) matrix for observed items
+    psi=psi #covariance matrix for factors
+)
+
+cl <- makeCluster(4) #defaults to PSOCK cluster
+clusterExport(cl, c("simCFAGraphs"))
+
+registerDoParallel(cl)
+clusterEvalQ(cl, library(dplyr)) #load dplyr in all workers
+
+#f1loading <- seq(0.15, 0.80, .01)
+#f2loading <- sqrt(r2 - f1loading^2 + .Machine$double.eps) #to avoid slightly negative numbers
+#f1loading^2 + f2loading^2
+
+#rework the loading grid to be in step size of variance explained .01 increment
+f_loading <- sqrt(seq(0, r2, .01))
+u_loading <- sqrt(r2 - f_loading^2 + .Machine$double.eps)
+f_loading^2 + u_loading^2
+loading_grid <- data.frame(f_loading, u_loading)
+
+#now build a 2-D grid for the unique factor based on the combinations
+#this sets up simulations in which y2 and y11 have variation in how much
+#their variation is explained by common factor variance (f1 or f2) or unique
+#variance (u).
+# fu_grid <- expand.grid(f1=paste(f_loading, u_loading, sep="_"),
+#                        f2=paste(f_loading, u_loading, sep="_")) %>%
+#   separate(f1, into=c("f1_loading", "u1_loading"), sep="_") %>%
+#   separate(f2, into=c("f2_loading", "u2_loading"), sep="_") %>%
+#   mutate_at(vars(f1_loading, f2_loading, u1_loading, u2_loading), funs(as.numeric))
+
+# fu_grid <- fu_grid[1:100,]
+#mlist_uniq <- foreach(i=iter(fu_grid, by='row')) %dopar% {
+
+#update: for identification, equate the loading of y2 and y11 on u (2-variable factor)
+mlist_uniq <- foreach(i=iter(loading_grid, by='row')) %dopar% {
+      mm <- model1
+      # mm$lambda[1, 2] <- i$f1_loading #loading of y2 on f1
+      # mm$lambda[3, 2] <- i$u1_loading #loading of y2 on u
+      # mm$lambda[2, 11] <- i$f2_loading #loading of y11 on f2
+      # mm$lambda[3, 11] <- i$u2_loading #loading of y11 on u
+      
+      mm$lambda[1, 2] <- i$f_loading #loading of y2 on f1
+      mm$lambda[3, 2] <- i$u_loading #loading of y2 on u
+      mm$lambda[2, 11] <- i$f_loading #loading of y11 on f2
+      mm$lambda[3, 11] <- i$u_loading #loading of y11 on u
+      sims <- simCFAGraphs(mm, nreplications=20, n=400, thetastart=TRUE, parallel=0, saveLavObj = FALSE)
+      
+      return(sims)
+}
+stopCluster(cl)
+```
+
+```{r dependson="fixedvar_cross"}
+y2eff <- do.call(rbind, lapply(mlist_uniq, function(cellreps) {
+  filter(cellreps$graph_v_factor$EBICglasso$metric_v_loadings, node=="y2")
+}))
+
+cor.test(~value + poploading, subset(y2eff, factor=="f3" & measure=="betweenness"))
+cor.test(~value + poploading, subset(y2eff, factor=="f1" & measure=="betweenness"))
+
+plot(~value + poploading, subset(y2eff, factor=="f3" & measure=="strength"))
+plot(~value + poploading, subset(y2eff, factor=="f1" & measure=="strength"))
+
+cor.test(~value + poploading, subset(y2eff, factor=="f3" & measure=="strength"))
+cor.test(~value + poploading, subset(y2eff, factor=="f1" & measure=="strength"))
+
+cor.test(~value + poploading, subset(y2eff, factor=="f3" & measure=="closeness"))
+cor.test(~value + poploading, subset(y2eff, factor=="f1" & measure=="closeness"))
+
+plot(~value + poploading, subset(y2eff, factor=="f3" & measure=="closeness")) #insanely quadratic
+plot(~value + poploading, subset(y2eff, factor=="f1" & measure=="closeness")) #insanely quadratic
+
+#temporarily: the quadratic shapes here show that as an item cross-loads on two factors,
+#it becomes highly central in the network
+
+#try plotting a network at low, medium, and high levels of f3
+qgraph(mlist_uniq[[1]]$adjmats$EBICglasso$average) #0.0 loading on f1, 0.80 loading on u (so y2 and y11 are part of u and not f1)
+qgraph(mlist_uniq[[32]]$adjmats$EBICglasso$average) #0.56 loading on f1, 0.57 loading on u (about equal for y2 and y11)
+qgraph(mlist_uniq[[65]]$adjmats$EBICglasso$average) #0.8 loading on f1, ~0 loading on u (so y2 and y11 are part of f1 and not u)
+
+y2y11_edge <- sapply(mlist_uniq, function(cell) {
+  cell$adjmats$EBICglasso$average["y2", "y11"]
+})
+
+loading_grid$uedge <- y2y11_edge
+cor.test(~uedge + f_loading, loading_grid)
+cor.test(~uedge + u_loading, loading_grid)
+
+plot(~uedge + I(f_loading^2), loading_grid)
+plot(~uedge + I(u_loading^2), loading_grid)
+
+#look at how edges for other nodes are affected by the unique y2-y11 edge across loadings
+#note that y1 y3 y4 etc. have an equal proportion of variation explained in each case
+
+
+allf <- mlist_uniq[[65]]$adjmats$EBICglasso$average
+allu <- mlist_uniq[[1]]$adjmats$EBICglasso$average
+blend <- mlist_uniq[[32]]$adjmats$EBICglasso$average
+
+allf_rmuitems <- allf[!rownames(allf) %in% c("y2", "y11"), !colnames(allf) %in% c("y2", "y11")]
+f1_allf <- allf_rmuitems[paste0("y", c(1, 3:10)), paste0("y", c(1, 3:10))]
+f1_allf <- f1_allf[lower.tri(f1_allf)]
+
+allu_rmuitems <- allu[!rownames(allu) %in% c("y2", "y11"), !colnames(allu) %in% c("y2", "y11")]
+f1_allu <- allu_rmuitems[paste0("y", c(1, 3:10)), paste0("y", c(1, 3:10))]
+f1_allu <- f1_allu[lower.tri(f1_allu)]
+
+blend_rmuitems <- blend[!rownames(blend) %in% c("y2", "y11"), !colnames(blend) %in% c("y2", "y11")]
+f1_blend <- blend_rmuitems[paste0("y", c(1, 3:10)), paste0("y", c(1, 3:10))]
+f1_blend <- f1_blend[lower.tri(f1_blend)]
+
+t.test(f1_blend, f1_allf)
+t.test(f1_blend, f1_allu)
+t.test(f1_allf, f1_allu)
+
+df <- data.frame(edge=c(f1_blend, f1_allf, f1_allu), 
+                 condition=rep(c("blend", "allshared", "allunique"), each=length(f1_allf)), subj=1:length(f1_allf))
+
+ggplot(df, aes(x=condition, y=edge)) + geom_boxplot()
+#pearson correlation for comparison
+
+
+library(ez)
+ezANOVA(df, dv=edge, wid=.(subj), within=.(condition))
+friedman.test(edge ~ condition | subj, df)
+
+allf <- mlist_uniq[[65]]$adjmats$pearson$average
+allu <- mlist_uniq[[1]]$adjmats$pearson$average
+blend <- mlist_uniq[[32]]$adjmats$pearson$average
+
+allf_rmuitems <- allf[!rownames(allf) %in% c("y2", "y11"), !colnames(allf) %in% c("y2", "y11")]
+f1_allf <- allf_rmuitems[paste0("y", c(1, 3:10)), paste0("y", c(1, 3:10))]
+f1_allf <- f1_allf[lower.tri(f1_allf)]
+
+allu_rmuitems <- allu[!rownames(allu) %in% c("y2", "y11"), !colnames(allu) %in% c("y2", "y11")]
+f1_allu <- allu_rmuitems[paste0("y", c(1, 3:10)), paste0("y", c(1, 3:10))]
+f1_allu <- f1_allu[lower.tri(f1_allu)]
+
+blend_rmuitems <- blend[!rownames(blend) %in% c("y2", "y11"), !colnames(blend) %in% c("y2", "y11")]
+f1_blend <- blend_rmuitems[paste0("y", c(1, 3:10)), paste0("y", c(1, 3:10))]
+f1_blend <- f1_blend[lower.tri(f1_blend)]
+
+t.test(f1_blend, f1_allf)
+t.test(f1_blend, f1_allu)
+t.test(f1_allf, f1_allu)
+
+
+```

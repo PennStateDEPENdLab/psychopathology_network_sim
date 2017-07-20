@@ -7,13 +7,19 @@
 #
 #Example: factor loading of 0.9, but target item variance of 1.0
 #  var(e_i) = 1.0 - .9^2 = .19
+#
+#Also note that item reliability is equal to the squared loading (explained variance)
+#  when item variance = 1.0 and factor variance = 1.0 (see Muthen & Muthen 2002 SEM Power study)
+#  Item reliability = (lambda^2*psi)/(lambda^2*psi + theta)
+#  where lambda is the item's factor loading, psi is factor variance, and theta is item residual variance
 computeResidvar <- function(targetitemvar, floadings, fvar=1.0) { 
   targetitemvar - apply(floadings^2, 2, sum)*fvar 
 }
 
 #simple function to work with simsem to return the data with simulation results so that it can be extracted for graphs
 savedat <- function(out, data) {
-  data #just return the dataset
+  list(lvobj=out, data=data) #return the dataset and lavaan object
+  #data #return the dataset
 }
 
 #function to add error correlation to model (theta) 
@@ -31,7 +37,7 @@ addErrorCor <- function(theta, vp, corval) {
 }
 
 #main worker function for generating lavaan syntax for CFA models
-buildLavaanSyntax <- function(varnames, lambda, theta, psi, psistart=FALSE, thetastart=FALSE) {
+buildLavaanSyntax <- function(varnames, lambda, lambdaconstraint=NULL, theta, psi, psistart=FALSE, thetastart=FALSE) {
   #lambda is an nfactors x nvariables loadings matrix (lambda)
   #theta is the error/residual covariance matrix for observed dependent variables
   #psi is the covariance matrix of latent variables (factors)
@@ -43,8 +49,28 @@ buildLavaanSyntax <- function(varnames, lambda, theta, psi, psistart=FALSE, thet
   fitsyntax <- c() #syntax for fitting simulated replications (doesn't get anything for free)
   #setup factor structure #lambda is nfactors x nvariables
   for (i in 1:nrow(lambda)) {
-    syntax <- c(syntax, paste0("f", i, " =~ ", paste(lambda[i, which(lambda[i,] != 0)], varnames[which(lambda[i,] != 0)], sep='*', collapse=" + ")))
-    fitsyntax <- c(fitsyntax, paste0("f", i, " =~ NA*", paste(varnames[which(lambda[i,] != 0)], collapse=" + "))) #force first loading to be free by prepending NA (standardized solution)
+    nzlambda <- which(lambda[i,] != 0)
+    
+    if (!is.null(lambdaconstraint)) {
+      thiscon <- sapply(lambdaconstraint[i,], function(x) { if(x==0) "NA" else paste0("v", x) })
+      whichcon <- which(thiscon != "NA") #position of variables having a constraint
+      
+      #trap condition where first loading on factor is part of an equality constraint
+      #in this case, we need to specify that indicator twice, one for freeing loading NA*y1 and once for constraint v1*y1
+      #see modifiers section here: http://lavaan.ugent.be/tutorial/syntax2.html
+      if (thiscon[nzlambda][1] != "NA") {
+        prepend <- paste0("NA*", varnames[nzlambda][1], " + ")
+      } else { prepend <- "" }
+      
+      if (length(whichcon) > 0L) { append <- paste0(" + ", paste(thiscon[whichcon], varnames[whichcon], sep='*', collapse=" + ")) } else { append <- "" }
+      syntax <- c(syntax, paste0("f", i, " =~ ", paste(lambda[i, nzlambda], varnames[nzlambda], sep='*', collapse=" + "), append)) #append constraints
+
+      fitsyntax <- c(fitsyntax, paste0("f", i, " =~ ", prepend, paste(thiscon[nzlambda], varnames[nzlambda], sep="*", collapse=" + "))) #force first loading to be free by prepending NA (standardized solution)  
+    } else {
+      syntax <- c(syntax, paste0("f", i, " =~ ", paste(lambda[i, nzlambda], varnames[nzlambda], sep='*', collapse=" + ")))
+      fitsyntax <- c(fitsyntax, paste0("f", i, " =~ NA*", paste(varnames[nzlambda], collapse=" + "))) #force first loading to be free by prepending NA (standardized solution)  
+    }
+    
   }
   
   #setup factor variance structure (psi)
@@ -80,7 +106,7 @@ buildLavaanSyntax <- function(varnames, lambda, theta, psi, psistart=FALSE, thet
   return(list(simsyntax=paste(syntax, collapse="\n"), fitsyntax=paste(fitsyntax, collapse="\n")))
 }
 
-simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EBICglasso", "pcor"), ...) { #, "IsingFit"
+simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EBICglasso", "pcor"), saveLavObj=FALSE, ...) { #, "IsingFit"
   require(simsem)
   require(parallel)
   require(abind)
@@ -89,14 +115,14 @@ simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EB
   require(doParallel)
   require(igraph)
   require(tidyr)
-  syntax <- buildLavaanSyntax(model$varnames, model$lambda, model$theta, model$psi, ...) #build lavaan syntax for simulation
-
+  syntax <- buildLavaanSyntax(varnames=model$varnames, lambda=model$lambda, lambdaconstraint=model$lambdaconstraint, 
+                              theta=model$theta, psi=model$psi, ...) #build lavaan syntax for simulation
   #note that by default, the fitted models are provided only with a configural model on which free parameters are estimated
   
   #randomize seed
   mySeed = as.POSIXlt(Sys.time())
   mySeed = 1000*(mySeed$hour*3600 + mySeed$min*60 + mySeed$sec)
-  
+
   simStruct <- simsem::sim(nRep=nreplications, model=syntax$fitsyntax, n=n, generate=syntax$simsyntax, 
       lavaanfun = "cfa", outfundata=savedat, multicore=FALSE, seed=mySeed) #TRUE)
   
@@ -108,7 +134,10 @@ simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EB
   outstruct <- list()
   outstruct$specification <- list(model=model, nreplications=nreplications, n=n, graphmethods=graphmethods, syntax=syntax) #snapshot of simulation structure
   outstruct$simsemout <- simStruct
-  outstruct$simdata <- dlist
+  outstruct$simdata <- lapply(dlist, "[[", "data")
+  if (saveLavObj) {
+    outstruct$lvobj <- lapply(dlist, "[[", "lvobj")
+  }
   
   #basic adjacency matrix based on pairwise pearson correlation (not partial)
   outstruct$adjmats[["pearson"]]$concat <- do.call(abind, list(lapply(outstruct$simdata, function(df) { cor(df) }), along=0))
@@ -118,11 +147,12 @@ simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EB
   if (!is.null(parallel) && parallel > 0) {
     cl <- makeCluster(parallel) #defaults to PSOCK cluster
     #clusterExport(cl, c("estimateNetwork"))#, "cd4.mle"))
-    clusterExport(cl, c("cor_auto", "cor2pcor", "EBICglasso"))
-    clusterEvalQ(cl, library(bootnet))
-    clusterEvalQ(cl, library(qgraph))
-    clusterEvalQ(cl, library(igraph))
-    clusterEvalQ(cl, library(tidyr))
+    #these were necessary under parLapply, but not under the new foreach using igraph directly
+    #clusterExport(cl, c("cor_auto", "cor2pcor", "EBICglasso")) #should be handled by foreach
+    #clusterEvalQ(cl, library(bootnet))
+    #clusterEvalQ(cl, library(qgraph))
+    #clusterEvalQ(cl, library(igraph))
+    #clusterEvalQ(cl, library(tidyr))
     
     registerDoParallel(cl)
     
@@ -136,7 +166,7 @@ simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EB
   
   for (method in graphmethods) {
     #achieve good speedup here using parallel execution
-    glist <- foreach(df=dlist, .packages=c("qgraph", "igraph", "tidyr")) %op% {
+    glist <- foreach(df=outstruct$simdata, .packages=c("qgraph", "igraph", "tidyr", "corpcor")) %op% {
           if (method=="EBICglasso") {
             cmat <- cor_auto(df, detectOrdinal = TRUE, ordinalLevelMax = 7, missing = "pairwise")
             adjmat <- EBICglasso(S=cmat, n=nrow(df), gamma=0.5, penalize.diagonal=FALSE, nlambda=100,
@@ -198,6 +228,10 @@ simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EB
 
     LongAll <- inner_join(LongAll, loadmaster, by="node")
 
+    #need to trim out equality constraint baggage from coefficient names
+    #example: v1 <- (f3=~y2)
+    names(outstruct[["simsemout"]]@coef) <- sub("\\w+ <- \\(([^)]+)\\)", "\\1", names(outstruct[["simsemout"]]@coef), perl=TRUE)
+
     fitted_loadings <- select(outstruct[["simsemout"]]@coef, matches("f\\d+=~"))
     fitted_loadings$graphNum <- 1:nrow(fitted_loadings)
 
@@ -208,7 +242,9 @@ simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EB
     LongAll <- inner_join(LongAll, wide_fitted, by=c("node", "graphNum"))
     
     #merge population and fitted residual correlations in theta to the centrality data.frame
-    coefnames <- strsplit(names(outstruct[["simsemout"]]@coef), "~~|=~")
+    #crazy regexp is to remove any constraint coefficients, labeled [ <conname> ] - [ <conname> ]
+    coefnames <- strsplit(grep("\\s*\\[\\s*\\w+\\s*\\]\\s*-\\s*\\[\\s*\\w+\\s*\\]\\s*", names(outstruct[["simsemout"]]@coef), perl=TRUE, value=TRUE, invert=TRUE), "~~|=~")
+    
     stopifnot(all(sapply(coefnames, length) == 2))
     coefnames <- data.frame(do.call(rbind, coefnames), stringsAsFactors=FALSE)
     rpos <- with(coefnames, which(substr(X1, 1, 1)=="y" & substr(X2, 1, 1)=="y" & X1 != X2)) #filter(residcov, substr(X1, 1, 1)=="y" & substr(X2, 1, 1)=="y" & X1 != X2) 
