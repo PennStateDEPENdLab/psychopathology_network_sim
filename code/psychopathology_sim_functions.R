@@ -106,7 +106,7 @@ buildLavaanSyntax <- function(varnames, lambda, lambdaconstraint=NULL, theta, ps
   return(list(simsyntax=paste(syntax, collapse="\n"), fitsyntax=paste(fitsyntax, collapse="\n")))
 }
 
-simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EBICglasso", "pcor"), saveLavObj=FALSE, ...) { #, "IsingFit"
+simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EBICglasso", "pcor"), saveLavObj=FALSE, saveSimsemout=FALSE, seed=NULL, ...) { #, "IsingFit"
   require(simsem)
   require(parallel)
   require(abind)
@@ -120,11 +120,13 @@ simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EB
   #note that by default, the fitted models are provided only with a configural model on which free parameters are estimated
   
   #randomize seed
-  mySeed = as.POSIXlt(Sys.time())
-  mySeed = 1000*(mySeed$hour*3600 + mySeed$min*60 + mySeed$sec)
+  if (is.null(seed)) {
+    seed = as.POSIXlt(Sys.time())
+    seed = 1000*(seed$hour*3600 + seed$min*60 + seed$sec)
+  }
 
   simStruct <- simsem::sim(nRep=nreplications, model=syntax$fitsyntax, n=n, generate=syntax$simsyntax, 
-      lavaanfun = "cfa", outfundata=savedat, multicore=FALSE, seed=mySeed) #TRUE)
+      lavaanfun = "cfa", outfundata=savedat, multicore=FALSE, seed=seed) #TRUE)
   
   #obtain raw simulated data for network analysis
   dlist <- getExtraOutput(simStruct) #only seems to work with convergence of estimated model?
@@ -290,14 +292,15 @@ simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EB
     #compute correlations between fitted loadings and node centrality
     outstruct$graph_v_factor[[method]]$corr_v_fitted <- outstruct$graph_v_factor[[method]]$metric_v_loadings %>%
         group_by(graphNum, measure, factor) %>% do({
-              #beware of occasional lack of variation in correlation              
+              #beware of occasional lack of variation in correlation (e.g., happens when there is simple structure in multi-factor models)
               if (sd(.$fittedloading) < 1e-8 || sd(.$value) < 1e-3) { cv = NA } else { cv = cor(.$fittedloading, .$value) }
               data.frame(graphNum=.$graphNum[1], measure=.$measure[1], cv=cv, stringsAsFactors=FALSE)
             }) %>% #summarize(cv=cor(loading,value)) %>%
         group_by(measure, factor) %>% summarize(mcv=mean(cv, na.rm=TRUE))
     
   }
-  
+
+  if (!saveSimsemout) { outstruct$simsemout <- NULL } #this takes up a lot of disk space, especially with updated package
   return(outstruct)
 }
 
@@ -306,7 +309,7 @@ demomaster <- function(nexamples=2, nindicators=20, nfactors=2, nreplications=20
     loadings="random", loadingsampler=seq(.4, .95, .05),
     prop_residcor=0.0, mag_residcor=function() { runif(1, 0.3, 0.7) },
     prop_crossload=0.0, mag_crossload=function() { runif(1, 0.3, 0.7) },
-    errorvars="eqresidvar", ivar=0.5, thetacorlist=NULL) {
+    errorvars="eqresidvar", ivar=0.5, thetacorlist=NULL, factor_correlation=0, ...) {
   
   # - nexamples: the number of population factor models from which data are simulated and fit.
   #    Each example draws a set of population factor loadings from the loadingsampler.
@@ -393,12 +396,17 @@ demomaster <- function(nexamples=2, nindicators=20, nfactors=2, nreplications=20
   lapply(1:nexamples, function(i) {
         if (randomloadings) {
           for (i in 1:nfactors) {
-            lambda[i,(i-1)*perfactor + 1:perfactor] <- sample(loadingsampler, perfactor, replace=TRUE)
+            if (class(loadingsampler) == "function") {
+              lambda[i,(i-1)*perfactor + 1:perfactor] <- loadingsampler(perfactor) #draw from some function/distribution
+            } else {
+              lambda[i,(i-1)*perfactor + 1:perfactor] <- sample(loadingsampler, perfactor, replace=TRUE)
+            }
           }      
         }
 
         fvar <- rep(1.0, nfactors) #standardized factor variance
-        psi <- diag(fvar) #zero covariance in factor structure at the moment
+        psi <- matrix(factor_correlation, nrow=nfactors, ncol=nfactors) #allow for uniform factor correlation
+        diag(psi) <- fvar
         dimnames(psi) <- list(f=paste0("f", 1:nrow(psi)), f=paste0("f", 1:ncol(psi)))
         
         #allow for random cross-loadings
@@ -451,8 +459,144 @@ demomaster <- function(nexamples=2, nindicators=20, nfactors=2, nreplications=20
         message("About to run the following model: ")
         print(m)
         
-        sims <- simCFAGraphs(m, nreplications=nreplications, n=n)
+        sims <- simCFAGraphs(m, nreplications=nreplications, n=n, ...)
         
         return(sims)
       })
+}
+
+
+##analysis functions
+
+summarize_loadings_convergence <- function(examplestruct) {
+  require(tidyverse)
+  require(knitr)
+  require(cowplot)
+  
+  ##just get a mean and SD of correlations between each nodal measure and factor loadings
+  edgebasis <- c("EBICglasso", "pcor") #methods for computing graphs
+  metrics <- c("strength", "closeness", "betweenness")
+  retlist <- list()
+  for (eb in edgebasis) {
+    corrvgraph <- do.call(rbind, lapply(examplestruct, function(example) { example$graph_v_factor[[eb]]$corr_v_fitted }))
+    
+    #note that $metric_v_loadings has detailed statistics. In particular, it is 6000 rows per example: 200 replications x 3 metrics x 10 indicators
+    corrvgraph_detailed <- do.call(rbind, lapply(1:length(examplestruct), function(ex) { 
+          df <- examplestruct[[ex]]$graph_v_factor[[eb]]$metric_v_loadings %>% mutate(value=ifelse(measure=="betweenness", log10(value + 1.1) + 1, value))  #mutate(value=ifelse(measure=="betweenness", sqrt(value), value))
+          #df$example <- ex
+          
+          #NB: if we group by factor and graph number (replication), then correlations are based on 10 samples (the 10 indicators)
+          #this could be risky in terms of noisiness of the association
+          #we could prefer computing correlations across all indicators and replications since these were drawn from the population model.
+          dfout <- df %>% group_by(factor, measure, graphNum) %>% summarize(r=cor(fittedloading, value)) %>% summarize(m_overreps=mean(r), sd_overreps=sd(r))
+          #dfout <- df %>% group_by(factor, measure) %>% summarize(r=cor(fittedloading, value)) #correlations across indicators and replications
+        }))
+    
+    #summarize(mr=mean(r), sdr=sd(r))
+    
+    #summary table
+    cat("\n\nAssociations between factor loadings and graph metrics for ", eb, "\n")
+    #print(kable(corrvgraph_detailed %>% group_by(measure, factor) %>% summarize(m_overexamples=mean(m_overreps), sd_overexamples=sd(m_overreps),
+    print(kable(corrvgraph_detailed %>% group_by(measure) %>% summarize(m_overexamples=mean(m_overreps), sd_overexamples=sd(m_overreps), #aggregate over factors
+          m_wiexample_sd=mean(sd_overreps), sd_wiexamples_sd=sd(sd_overreps)), 
+        digits=4, caption = paste0("Association of ", eb, " graph measures with 1-factor CFA loadings")))
+    
+    
+    #compute plots of association between loadings and metrics
+    glist <- list()
+    for (m in metrics) {
+      smat <- do.call(rbind, lapply(1:length(examplestruct), function(ex) {
+            #brep <- filter(examplestruct[[ex]]$graph_v_factor[[eb]]$metric_v_loadings, node=="y1" & measure==m & fittedloading < 1)
+            brep <- filter(examplestruct[[ex]]$graph_v_factor[[eb]]$metric_v_loadings, measure==m & fittedloading < 1)
+            if (m == "betweenness") { brep$value <- log10(brep$value + 1.1) + 1 }
+            brep$example <- ex
+            brep
+          }))
+      
+      bb <- smat %>% select(graphNum, value, node, example, factor, fittedloading) %>% spread(key=factor, value=fittedloading) %>%
+        filter(node %in% c("y1", "y2", "y3")) #for ease of display
+      cv <- bb %>% group_by(node) %>% summarize(cv=cor(value, f1)) %>% mutate(x=min(bb$f1) + 0.1*diff(range(bb$f1)), y=max(bb$value) - 0.3*diff(range(bb$value)))
+      g <- ggplot(bb, aes(x=f1, y=value)) + geom_point(alpha=0.5) + stat_smooth(method="lm") + xlab("Fitted factor loading") +
+        ylab(m) + theme_bw(base_size=15) + geom_text(data=cv, aes(x=x, y=y, label=paste0("r = ", round(cv, 2)))) + #annotate(geom="text", x = 0.4, y=1.1, label=paste0("r = ", round(cv, 2))) + theme_cowplot(font_size=20) +
+        facet_wrap(~ node)
+      glist[[m]] <- g
+    }
+    
+    retlist[[eb]] <- list(corrvgraph_detailed = corrvgraph_detailed, corrvgraph = corrvgraph, glist=glist)
+    #do.call(plot_grid, c(glist, ncol=1))
+  }
+  
+  return(retlist)  
+}
+
+
+
+#this returns 400 x 100. 400 is the 20x20 off-factor matrix (target indicators x off-factor indicators)
+#100 is the number of replications in this example
+get_off_factor_dist <- function(example, method="EBICglasso", perfactor=10) {
+  require(reshape2)
+  
+  nfactors <- dim(example$adjmats[[method]]$concat)[2] / perfactor
+  
+  #replications x variables x off-factor edge
+  off_factor_dist <- plyr::aaply(example$adjmats[[method]]$concat, 1, function(replication) {
+      nvar <- ncol(replication)
+      off_factor <- matrix(NA, nrow=nvar, nvar - perfactor) #no columns for on-factor
+      for (f in 1:nfactors) {
+        offset <- (f-1)*perfactor
+        for (o in 1:perfactor) {
+          off_factor[o+offset,] <- replication[o+offset, (1:nvar)[-1*(offset + 1:perfactor)] ]
+        }
+      }
+      return(off_factor)
+    })
+  
+  off_sum <- apply(off_factor_dist, c(1,2), function(v) { sum(abs(v)) })
+  
+#  off_factor_dist_old <- apply(example$adjmats[[method]]$concat, 1, function(replication) {
+#      off_factor <- matrix(NA, nrow=ncol(replication), ncol(replication) - perfactor)
+#      for (o in 1:nrow(off_factor)) {
+#        if (o <= 10) {
+#          block <- replication[o, 11:20] #this is hard-coded for 10 indicators per factor
+#        } else {
+#          block <- replication[o, 1:10]
+#        }
+#        off_factor[o,] <- block
+#      }
+#      return(off_factor)
+#    })
+  
+  #vv_off <- reshape2::melt(off_factor_dist, varnames=c("element", "replication"))
+  
+  vv_off <- reshape2::melt(off_sum, varnames=c("graphNum", "node"))
+  
+  on_factor_dist <- plyr::aaply(example$adjmats[[method]]$concat, 1, function(replication) {
+      on_factor <- matrix(NA, nrow=ncol(replication), perfactor - 1)
+      for (f in 1:nfactors) {
+        offset <- (f-1)*perfactor
+        for (o in 1:perfactor) {
+          on_factor[o+offset,] <- replication[o+offset, (offset + 1:perfactor)[-1*(o)] ]
+        }
+      }
+      return(on_factor)
+    })
+  
+#  on_factor <- apply(example$adjmats[[method]]$concat, 1, function(replication) {
+#      on_factor <- matrix(NA, nrow=ncol(replication), ncol=ncol(replication)/nfactors - 1) #always remove the self-correlation element
+#      for (o in 1:length(on_factor)) {
+#        if (o > 10) {
+#          block <- replication[o, 11:20] #this is hard-coded for 10 indicators per factor
+#        } else {
+#          block <- replication[o, 1:10]
+#        }
+#        #wvec <- block[lower.tri(block)]
+#        on_factor[o,] <- block[-o] #mean(abs(block[block != 0])) #remove zero self-correlation (diagonal) from mean
+#      }
+#      return(on_factor)
+#    })
+  
+  on_sum <- apply(on_factor_dist, c(1,2), function(v) { sum(abs(v)) })
+
+  vv_on <- reshape2::melt(on_sum, varnames=c("graphNum", "node"))
+  return(list(off=vv_off, on=vv_on))
 }
