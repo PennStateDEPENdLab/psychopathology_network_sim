@@ -12,8 +12,13 @@
 #  when item variance = 1.0 and factor variance = 1.0 (see Muthen & Muthen 2002 SEM Power study)
 #  Item reliability = (lambda^2*psi)/(lambda^2*psi + theta)
 #  where lambda is the item's factor loading, psi is factor variance, and theta is item residual variance
-computeResidvar <- function(targetitemvar, floadings, fvar=1.0) { 
-  targetitemvar - apply(floadings^2, 2, sum)*fvar 
+computeResidvar <- function(targetitemvar, floadings, fvar=1.0) {
+  #fvar is a vector with one variance per factor
+  #need to apply appropriate variance to its indicators
+  #use the sweep function to row-wise multiply by the correct element of fvar
+  targetitemvar - apply(sweep(floadings^2, 1, fvar, "*"), 2, sum)
+  
+  #targetitemvar - apply(floadings^2, 2, sum)*fvar #this will not work as expected for multi-factor models  
 }
 
 #simple function to work with simsem to return the data with simulation results so that it can be extracted for graphs
@@ -106,7 +111,7 @@ buildLavaanSyntax <- function(varnames, lambda, lambdaconstraint=NULL, theta, ps
   return(list(simsyntax=paste(syntax, collapse="\n"), fitsyntax=paste(fitsyntax, collapse="\n")))
 }
 
-simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EBICglasso", "pcor"), saveLavObj=FALSE, saveSimsemout=FALSE, seed=NULL, ...) { #, "IsingFit"
+simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EBICglasso", "pcor", "cor.shrink"), saveLavObj=FALSE, saveSimsemout=FALSE, seed=NULL, ...) { #, "IsingFit"
   require(simsem)
   require(parallel)
   require(abind)
@@ -178,8 +183,10 @@ simCFAGraphs <- function(model, nreplications, n, parallel=4, graphmethods=c("EB
             cmat <- cor_auto(df, detectOrdinal = TRUE, ordinalLevelMax = 7, missing = "pairwise")
             adjmat <- cor2pcor(cmat)
             dimnames(adjmat) <- list(names(df), names(df)) #function drops the names
+          } else if (method=="cor.shrink") { #shrinkage estimator of marginal association
+            adjmat <- corpcor::cor.shrink(df)
+            dimnames(adjmat) <- list(names(df), names(df)) #function drops the names
           }
-          
           gg <- igraph::graph_from_adjacency_matrix(adjmat, mode="undirected", weighted=TRUE, diag=FALSE)
           return(gg)
           

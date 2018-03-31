@@ -831,7 +831,7 @@ plot(~value + poploading, subset(y2eff, factor=="f1" & measure=="closeness")) #i
 #try plotting a network at low, medium, and high levels of f3
 qgraph(mlist_uniq[[1]]$adjmats$EBICglasso$average) #0.0 loading on f1, 0.80 loading on u (so y2 and y11 are part of u and not f1)
 qgraph(mlist_uniq[[32]]$adjmats$EBICglasso$average) #0.56 loading on f1, 0.57 loading on u (about equal for y2 and y11)
-qgraph(mlist_uniq[[65]]$adjmats$EBICglasso$average) #0.8 loading on f1, ~0 loading on u (so y2 and y11 are part of f1 and not u)
+qgraph(mlist_uniq[[65]]$adjmats$EBICglasso$average) #0.8 loading on f1, ~0 loading on u (so y2 and y11 are part of f1 and f2, respectively, and not u)
 
 y2y11_edge <- sapply(mlist_uniq, function(cell) {
   cell$adjmats$EBICglasso$average["y2", "y11"]
