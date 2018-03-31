@@ -86,7 +86,7 @@ y2y11_edge <- sapply(mlist_uniq, function(cell) {
   })
 
 y2y11_ebic_melt <- reshape2::melt(y2y11_edge, varnames=c("replication", "condition"), value.name="edge")
-y2y11_ebic_melt$method <- "glasso"
+y2y11_ebic_melt$method <- "EBICGLASSO"
 
 y2y11_edge_pcor <- sapply(mlist_uniq, function(cell) {
     #cell$adjmats$pcor$average["y2", "y11"]
@@ -94,7 +94,7 @@ y2y11_edge_pcor <- sapply(mlist_uniq, function(cell) {
   })
 
 y2y11_pcor_melt <- reshape2::melt(y2y11_edge_pcor, varnames=c("replication", "condition"), value.name="edge")
-y2y11_pcor_melt$method <- "pcor"
+y2y11_pcor_melt$method <- "PCor"
 
 y2y11_all <- rbind(y2y11_ebic_melt, y2y11_pcor_melt)
 
@@ -105,14 +105,18 @@ y2y11_byf <- y2y11_df %>% group_by(r2_f, method) %>% dplyr::do(bootf(.$edge, con
 y2y11_byu <- y2y11_df %>% group_by(r2_u, method) %>% dplyr::do(bootf(.$edge, conf.int=0.99)) %>% ungroup() %>% mutate(r2_u = factor(r2_u))
 
 g1 <- ggplot(y2y11_byf, aes(x=r2_f, y=Mean, ymin=Lower, ymax=Upper, color=method, group=method)) + geom_line(size=1) + geom_ribbon(aes(color=NULL), fill="grey60", alpha=0.5) + theme_bw(base_size=14) + xlab("Variance explained by factor") + ylab("Average edge strength between y2 and y11") +
-  scale_x_discrete(breaks=c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6)) + scale_color_brewer("Edge Method", palette="Dark2") #+ scale_fill_brewer("Edge Method", palette="Dark2")
+  scale_x_discrete(breaks=c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6)) + scale_color_brewer("Edge definition", palette="Dark2") #+ scale_fill_brewer("Edge Method", palette="Dark2")
 
 g2 <- ggplot(y2y11_byu, aes(x=r2_u, y=Mean, ymin=Lower, ymax=Upper, color=method, group=method)) + geom_line(size=1) + geom_ribbon(aes(color=NULL), fill="grey60", alpha=0.5) + theme_bw(base_size=14) + xlab("Variance explained by residual association") + ylab("Average edge strength between y2 and y11") +
-  scale_x_discrete(breaks=c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6)) + scale_color_brewer("Edge Method", palette="Dark2") #+ scale_fill_brewer("Edge Method", palette="Dark2")
+  scale_x_discrete(breaks=c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6)) + scale_color_brewer("Edge definition", palette="Dark2") #+ scale_fill_brewer("Edge Method", palette="Dark2")
 
-library(cowplot)
 pdf("figures/y2y11_association_2panels.pdf", width=10, height=5)
 plot_grid(g1 + theme(legend.position="none", plot.margin=margin(t=30, l=10, b=10, r=15)), g2 + theme(plot.margin=margin(t=30, l=10, b=10, r=15)), align="hv", axis="lt", labels=c("a)", "b)"), rel_widths=c(0.75, 1))
+dev.off()
+
+#on further reflection, because the 2-panel graph is a pure mirror-reverse, just include the residual association plot
+pdf("figures/y2y11_association_residonly.pdf", width=7, height=5)
+g2 + theme_bw(base_size=16) + theme(axis.title.x = element_text(margin=margin(t=10)), axis.title.y = element_text(margin=margin(r=10)))
 dev.off()
 
 
@@ -156,10 +160,13 @@ nodalstats <- do.call(rbind, lapply(1:length(mlist_uniq), function(i) {
       #thus, just focus on y2 and y3 as exemplars for graphs
       #df1 <- filter(mlist_uniq[[i]]$graph_v_factor$EBICglasso$metric_v_loadings, node %in% c("y2", "y3")) %>% mutate(method="glasso", condition = i)
       #df2 <- filter(mlist_uniq[[i]]$graph_v_factor$pcor$metric_v_loadings, node %in% c("y2", "y3")) %>% mutate(method="pcor", condition = i)
-      df1 <- mlist_uniq[[i]]$graph_v_factor$EBICglasso$metric_v_loadings %>% mutate(method="glasso", condition = i)
-      df2 <- mlist_uniq[[i]]$graph_v_factor$pcor$metric_v_loadings %>% mutate(method="pcor", condition = i)
-      return(rbind(df1, df2))
+      df1 <- mlist_uniq[[i]]$graph_v_factor$EBICglasso$metric_v_loadings %>% mutate(method="EBICGLASSO", condition = i)
+      df2 <- mlist_uniq[[i]]$graph_v_factor$pcor$metric_v_loadings %>% mutate(method="PCor", condition = i)
+      df3 <- mlist_uniq[[i]]$graph_v_factor$cor.shrink$metric_v_loadings %>% mutate(method="Cor.Shrink", condition = i)
+      return(rbind(df1, df2, df3))
     }))
+
+#pull in Pearson or cor.shrink correlation for reference? This would require a bigger overhaul since we never defined graphs from marginal association 
 
 #y2 and y11 patterns look identical. Rather than confuse the reader, just show one and mention the other in the caption
 nodalstats <- nodalstats %>% inner_join(loading_grid, by="condition")
@@ -211,20 +218,23 @@ gbase <- ggplot(mapping=aes(y=Mean_rm, ymax=Upper_rm, ymin=Lower_rm, x=r2_diff, 
     panel.spacing=unit(20, "pt"))
 
 
-pdf("figures/strength_vs_loading.pdf", width=12, height=12)
-g1 <- gbase %+% dplyr::filter(nodalstats_repagg, measure=="strength") + ylab("Strength")
+g1supp <- gbase %+% dplyr::filter(nodalstats_repagg, measure=="strength") + ylab("Strength")
+pdf("figures/strength_vs_loading.pdf", width=16, height=12)
+g1 <- gbase %+% dplyr::filter(nodalstats_repagg, measure=="strength" & !method=="Cor.Shrink") + ylab("Strength")
 plot(g1)
 dev.off()
 
 
+g2supp <- gbase %+% dplyr::filter(nodalstats_repagg, measure=="closeness") + ylab("Closeness")
 pdf("figures/closeness_vs_loading.pdf", width=8, height=6)
-g2 <- gbase %+% dplyr::filter(nodalstats_repagg, measure=="closeness") + ylab("Closeness")
+g2 <- gbase %+% dplyr::filter(nodalstats_repagg, measure=="closeness" & !method=="Cor.Shrink") + ylab("Closeness")
 plot(g2)
 dev.off()
 
 
+g3supp <- gbase %+% dplyr::filter(nodalstats_repagg, measure=="betweenness") + ylab("Betweenness")
 pdf("figures/betweenness_vs_loading.pdf", width=12, height=12)
-g3 <- gbase %+% dplyr::filter(nodalstats_repagg, measure=="betweenness") + ylab("Betweenness") #aes(y=log10(Mean_rm + 1), ymin=log10(Lower_rm + 1), ymax=log10(Upper_rm + 1)) #+ coord_trans(y = "log10")
+g3 <- gbase %+% dplyr::filter(nodalstats_repagg, measure=="betweenness" & !method=="Cor.Shrink") + ylab("Betweenness") #aes(y=log10(Mean_rm + 1), ymin=log10(Lower_rm + 1), ymax=log10(Upper_rm + 1)) #+ coord_trans(y = "log10")
 plot(g3)
 dev.off()
 
@@ -232,8 +242,17 @@ dev.off()
 legend <- get_legend(g1 + guides(color=guide_legend(title.position="left")) + theme(legend.position="top")) #THESE SEEM TO HAVE NO EFFECT... legend.text=element_text(size=10, margin=margin(l=50, r=50, t=50, b=50)), legend.spacing=unit(100, "pt")
 library(cowplot)
 #theme(legend.position="none", plot.margin=margin(t=30, l=10, b=10, r=15)), g2 + theme(plot.margin=margin(t=30, l=10, b=10, r=15))
+
 pdf("figures/sim2_nodal_panels.pdf", width=7, height=12)
 plot_grid(g1 + xlab("") + theme(legend.position="none"), g2 + xlab("") + theme(legend.position="none"), g3 + theme(legend.position="none"), 
+  align="hv", labels=c("a)", "b)", "c)"), axis="ltbr", ncol=1, rel_heights=c(1, 1, 1), label_size=21) #, rel_widths=c(0.75, 1))
+#plot_grid(legend, g1 + xlab("") + theme(legend.position="none"), g2 + xlab("") + theme(legend.position="none"), g3 + theme(legend.position="none"), 
+#  align="hv", labels=c("", "a)", "b)", "c)"), axis="lt", ncol=1, rel_heights=c(0.3, 1, 1, 1), label_size=21) #, rel_widths=c(0.75, 1))
+dev.off()
+
+
+pdf("figures/sim2_nodal_panels_withcorshrink.pdf", width=9, height=12)
+plot_grid(g1supp + xlab("") + theme(legend.position="none"), g2supp + xlab("") + theme(legend.position="none"), g3supp + theme(legend.position="none"), 
   align="hv", labels=c("a)", "b)", "c)"), axis="ltbr", ncol=1, rel_heights=c(1, 1, 1), label_size=21) #, rel_widths=c(0.75, 1))
 #plot_grid(legend, g1 + xlab("") + theme(legend.position="none"), g2 + xlab("") + theme(legend.position="none"), g3 + theme(legend.position="none"), 
 #  align="hv", labels=c("", "a)", "b)", "c)"), axis="lt", ncol=1, rel_heights=c(0.3, 1, 1, 1), label_size=21) #, rel_widths=c(0.75, 1))

@@ -6,6 +6,8 @@ library(lavaan)
 library(viridis)
 library(dplyr)
 library(lme4)
+library(tidyr)
+library(broom)
 lm.beta.lmer <- function(mod) {
   b <- fixef(mod)[-1]
   sd.x <- apply(getME(mod,"X")[,-1],2,sd)
@@ -398,6 +400,7 @@ get_off_factor_dist_allexamples <- function(exampleslist, edge_method="EBICglass
 ofd_all_orthogonal_glasso <- get_off_factor_dist_allexamples(dd2, edge_method="EBICglasso")
 ofd_all_orthogonal_pcor <- get_off_factor_dist_allexamples(dd2, edge_method="pcor")
 
+#hacky way to get correlated results for two-panel figure (uncomment and re-run, store into ggcorr object...)
 #ofd_all_orthogonal_glasso <- get_off_factor_dist_allexamples(dd2_corr, edge_method="EBICglasso")
 #ofd_all_orthogonal_pcor <- get_off_factor_dist_allexamples(dd2_corr, edge_method="pcor")
 
@@ -494,9 +497,10 @@ tmppcor <- cbind(tmppcor, cis)
 par_bw <- rbind(tmpglasso, tmppcor)
 
 par_all <- rbind(par_st, par_cl, par_bw) %>% mutate(term=recode(term, fittedloading_std="loading", off_factor_sum_std="off-factor\nsum"), 
-  metric=ordered(metric, levels=c("strength", "closeness", "betweenness")))
+  metric=ordered(metric, levels=c("strength", "closeness", "betweenness"), labels=c("Strength", "Closeness", "Betweenness")),
+  method=if_else(method=="ebicglasso", "EBICGLASSO", "PCor"))
   
-
+  
 pdf("figures/loadings_v_off_factor_lmercoefs_orthogonal.pdf", width=8, height=5)
 ggorthogonal <- ggplot(par_all, aes(x=term, y=estimate, ymin=ci_0.5, ymax=ci_99.5, color=method, fill=method)) + 
   geom_col(position=position_dodge(width=0.5), width=0.4) + geom_linerange(position=position_dodge(width=0.5), size=2, color="black") + facet_grid(. ~ metric, scales="free") + theme_bw(base_size=14) +
