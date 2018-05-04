@@ -37,7 +37,7 @@ bootf <- function(x, ...) {
 
 #test equivalence of covariance versus 2-indicator latent
 cat(mlist_uniq[[1]]$specification$syntax$fitsyntax)
-mm_2indlatent <- cfa(mlist_uniq[[20]]$specification$syntax$fitsyntax, data=mlist_uniq[[20]]$simdata[[30]]) #check the model that was fitted
+mm_2indlatent <- cfa(mlist_uniq[[20]]$specification$syntax$fitsyntax, data=mlist_uniq[[65]]$simdata[[30]]) #check the model that was fitted
 inspect(mm_2indlatent, 'r2')
 #residual correlation syntax
 msyn <- '
@@ -71,6 +71,9 @@ y20 ~~ start(0.36)*y20
 mm_residcorr <- cfa(msyn, data=mlist_uniq[[65]]$simdata[[5]]) #check the model that was fitted
 
 mean(sapply(mlist_uniq[[1]]$simdata, function(mat) { cor(mat$y2, mat$y11) })) #marginal association of 0.64
+
+mean(sapply(mlist_uniq[[1]]$simdata, function(mat) { summary(lm(y2 ~ y11, mat))$r.squared }))
+
 #I haven't lost my sanity that these are equivalent models
 summary(mm_2indlatent,fit.measures=T, standardized=T) #.677^2 = .459 (square factor loading to get correlation)
 summary(mm_residcorr,fit.measures=T, standardized=T) #.459 correlation
@@ -107,16 +110,19 @@ y2y11_byu <- y2y11_df %>% group_by(r2_u, method) %>% dplyr::do(bootf(.$edge, con
 g1 <- ggplot(y2y11_byf, aes(x=r2_f, y=Mean, ymin=Lower, ymax=Upper, color=method, group=method)) + geom_line(size=1) + geom_ribbon(aes(color=NULL), fill="grey60", alpha=0.5) + theme_bw(base_size=14) + xlab("Variance explained by factor") + ylab("Average edge strength between y2 and y11") +
   scale_x_discrete(breaks=c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6)) + scale_color_brewer("Edge definition", palette="Dark2") #+ scale_fill_brewer("Edge Method", palette="Dark2")
 
-g2 <- ggplot(y2y11_byu, aes(x=r2_u, y=Mean, ymin=Lower, ymax=Upper, color=method, group=method)) + geom_line(size=1) + geom_ribbon(aes(color=NULL), fill="grey60", alpha=0.5) + theme_bw(base_size=14) + xlab("Variance explained by residual association") + ylab("Average edge strength between y2 and y11") +
-  scale_x_discrete(breaks=c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6)) + scale_color_brewer("Edge definition", palette="Dark2") #+ scale_fill_brewer("Edge Method", palette="Dark2")
+g2 <- ggplot(y2y11_byu, aes(x=r2_u, y=Mean, ymin=Lower, ymax=Upper, color=method, group=method)) + geom_ribbon(aes(color=NULL), fill="grey88", alpha=1) + geom_line(size=1.3) + theme_bw(base_size=14) + 
+  xlab("Variance explained by specific association") + ylab("Average edge strength between y2 and y11") +
+  scale_x_discrete(breaks=c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6)) + #scale_color_brewer("Edge definition", palette="Dark2") #+ scale_fill_brewer("Edge Method", palette="Dark2")
+  scale_color_viridis("Edge definition", discrete=TRUE, begin=0.2, end=0.8, option="cividis")
 
-pdf("figures/y2y11_association_2panels.pdf", width=10, height=5)
-plot_grid(g1 + theme(legend.position="none", plot.margin=margin(t=30, l=10, b=10, r=15)), g2 + theme(plot.margin=margin(t=30, l=10, b=10, r=15)), align="hv", axis="lt", labels=c("a)", "b)"), rel_widths=c(0.75, 1))
-dev.off()
+#pdf("figures/y2y11_association_2panels.pdf", width=10, height=5)
+#plot_grid(g1 + theme(legend.position="none", plot.margin=margin(t=30, l=10, b=10, r=15)), g2 + theme(plot.margin=margin(t=30, l=10, b=10, r=15)), align="hv", axis="lt", labels=c("a)", "b)"), rel_widths=c(0.75, 1))
+#dev.off()
 
 #on further reflection, because the 2-panel graph is a pure mirror-reverse, just include the residual association plot
 pdf("figures/y2y11_association_residonly.pdf", width=7, height=5)
-g2 + theme_bw(base_size=16) + theme(axis.title.x = element_text(margin=margin(t=10)), axis.title.y = element_text(margin=margin(r=10)))
+g2 + theme_bw(base_size=16) + theme(axis.title.x = element_text(margin=margin(t=10)), axis.title.y = element_text(margin=margin(r=10)), 
+  panel.grid.minor=element_blank(), panel.grid.major=element_line(color="grey94"))
 dev.off()
 
 
@@ -158,7 +164,7 @@ nodalstats <- do.call(rbind, lapply(1:length(mlist_uniq), function(i) {
       #updated approach: y2 and y11 are the targeted indicators, but the effects are identical (since the structure is parallel)
       #likewise, all of the other nodes/indicators (y3, y4, etc.) are fungible and their effects look identical, too
       #thus, just focus on y2 and y3 as exemplars for graphs
-      #df1 <- filter(mlist_uniq[[i]]$graph_v_factor$EBICglasso$metric_v_loadings, node %in% c("y2", "y3")) %>% mutate(method="glasso", condition = i)
+      #df1 <- filter(mlist_uniq[[i]]$graph_v_factor$EBICglasso$metric_v_loadings, node %in% c("y2", "y3")) %>% mutate(method="EBICGLASSO", condition = i)
       #df2 <- filter(mlist_uniq[[i]]$graph_v_factor$pcor$metric_v_loadings, node %in% c("y2", "y3")) %>% mutate(method="pcor", condition = i)
       df1 <- mlist_uniq[[i]]$graph_v_factor$EBICglasso$metric_v_loadings %>% mutate(method="EBICGLASSO", condition = i)
       df2 <- mlist_uniq[[i]]$graph_v_factor$pcor$metric_v_loadings %>% mutate(method="PCor", condition = i)
@@ -176,12 +182,12 @@ nodalstats <- nodalstats %>% inner_join(loading_grid, by="condition")
 #library(forcats)
 nodalstats$popr2 <- nodalstats$poploading^2
 
-#tmp <- nodalstats %>% filter(measure=="strength" & method=="glasso" & graphNum==1) %>% arrange(condition, graphNum, factor)
+#tmp <- nodalstats %>% filter(measure=="strength" & method=="EBICGLASSO" & graphNum==1) %>% arrange(condition, graphNum, factor)
 
 #by definition, there is only one unique centrality estimate for the node at every condition that reflects a
 #combination of the f (factor) loading and the u (unique) loading. Thus, filter out redundant information.
 #there should be one row per condition and metric
-nodalstats <- nodalstats %>% group_by(node, measure, method, graphNum, condition) %>% filter(row_number() == 1) %>% ungroup() %>% data.frame() #%>% filter(measure=="strength" & method=="glasso") 
+nodalstats <- nodalstats %>% group_by(node, measure, method, graphNum, condition) %>% filter(row_number() == 1) %>% ungroup() %>% data.frame() #%>% filter(measure=="strength" & method=="EBICGLASSO") 
 
 #this is now irrelevant since we filter out the redundant info
 #nodalstats<- nodalstats %>% mutate(source=recode(factor, "f1"="factor", "f2"="factor", "f3"="residual association"))
@@ -274,14 +280,14 @@ nodalstats <- nodalstats %>% mutate(
 )
 
 
-summary(m0 <- lmer(value ~ 1 + (1|condition:graphNum) + (1|node), filter(nodalstats, measure=="closeness" & method=="glasso")))
-summary(m1 <- lmer(value ~ r2_diff + type + (1|condition:graphNum), filter(nodalstats, measure=="closeness" & method=="glasso")))
-summary(m2 <- lmer(value ~ r2_diff + type + (1|condition:graphNum) + (1|node), filter(nodalstats, measure=="closeness" & method=="glasso")))
+summary(m0 <- lmer(value ~ 1 + (1|condition:graphNum) + (1|node), filter(nodalstats, measure=="closeness" & method=="EBICGLASSO")))
+summary(m1 <- lmer(value ~ r2_diff + type + (1|condition:graphNum), filter(nodalstats, measure=="closeness" & method=="EBICGLASSO")))
+summary(m2 <- lmer(value ~ r2_diff + type + (1|condition:graphNum) + (1|node), filter(nodalstats, measure=="closeness" & method=="EBICGLASSO")))
 anova(m0, m1, m2) #all variance in node explained by type, it appears (makes sense given design)
 
-summary(m3 <- lmer(value ~ r2_diff + r2_diff_sq + type + (1|condition:graphNum), filter(nodalstats, measure=="closeness" & method=="glasso")))
-summary(m4 <- lmer(value ~ r2_diff + r2_diff_sq + r2_diff_cu + type + (1|condition:graphNum), filter(nodalstats, measure=="closeness" & method=="glasso")))
-summary(m4 <- lmer(value ~ r2_diff*type + r2_diff_sq*type + (1|condition:graphNum), filter(nodalstats, measure=="closeness" & method=="glasso")))
+summary(m3 <- lmer(value ~ r2_diff + r2_diff_sq + type + (1|condition:graphNum), filter(nodalstats, measure=="closeness" & method=="EBICGLASSO")))
+summary(m4 <- lmer(value ~ r2_diff + r2_diff_sq + r2_diff_cu + type + (1|condition:graphNum), filter(nodalstats, measure=="closeness" & method=="EBICGLASSO")))
+summary(m4 <- lmer(value ~ r2_diff*type + r2_diff_sq*type + (1|condition:graphNum), filter(nodalstats, measure=="closeness" & method=="EBICGLASSO")))
 anova(m1, m3, m4)
 
 library(emmeans)
@@ -290,15 +296,15 @@ emtrends(m1, ~type, var="r2_diff_sq")
 
 
 #STRENGTH
-summary(m0 <- lmer(value ~ 1 + (1|condition:graphNum) + (1|node), filter(nodalstats, measure=="strength" & method=="glasso")))
-summary(m1 <- lmer(value ~ r2_diff + type + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="glasso")))
-summary(m2 <- lmer(value ~ r2_diff + type + (1|condition:graphNum) + (1|node), filter(nodalstats, measure=="strength" & method=="glasso")))
+summary(m0 <- lmer(value ~ 1 + (1|condition:graphNum) + (1|node), filter(nodalstats, measure=="strength" & method=="EBICGLASSO")))
+summary(m1 <- lmer(value ~ r2_diff + type + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="EBICGLASSO")))
+summary(m2 <- lmer(value ~ r2_diff + type + (1|condition:graphNum) + (1|node), filter(nodalstats, measure=="strength" & method=="EBICGLASSO")))
 anova(m0, m1, m2) #all variance in node explained by type, it appears (makes sense given design)
 
-summary(m3 <- lmer(value ~ r2_diff + r2_diff_sq + type + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="glasso")))
-summary(m4 <- lmer(value ~ r2_diff + r2_diff_sq + r2_diff_cu + type + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="glasso")))
-summary(m5 <- lmer(value ~ r2_diff*type + r2_diff_sq*type + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="glasso")))
-summary(m6 <- lmer(value ~ r2_diff*type + r2_diff_sq*type + r2_diff_cu*type + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="glasso")))
+summary(m3 <- lmer(value ~ r2_diff + r2_diff_sq + type + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="EBICGLASSO")))
+summary(m4 <- lmer(value ~ r2_diff + r2_diff_sq + r2_diff_cu + type + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="EBICGLASSO")))
+summary(m5 <- lmer(value ~ r2_diff*type + r2_diff_sq*type + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="EBICGLASSO")))
+summary(m6 <- lmer(value ~ r2_diff*type + r2_diff_sq*type + r2_diff_cu*type + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="EBICGLASSO")))
 anova(m1, m3, m4, m5, m6)
 
 library(emmeans)
@@ -307,12 +313,12 @@ emtrends(m6, ~type, var="r2_diff_sq")
 emtrends(m6, ~type, var="r2_diff_cu")
 
 #just look at target and comparator separately for a second
-summary(m3 <- lmer(value ~ r2_diff + r2_diff_sq + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="glasso" & type=="Target")))
-summary(m4 <- lmer(value ~ r2_diff + r2_diff_sq + r2_diff_cu + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="glasso" & type=="Target")))
+summary(m3 <- lmer(value ~ r2_diff + r2_diff_sq + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="EBICGLASSO" & type=="Target")))
+summary(m4 <- lmer(value ~ r2_diff + r2_diff_sq + r2_diff_cu + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="EBICGLASSO" & type=="Target")))
 anova(m3, m4)
 
-summary(m3 <- lmer(value ~ r2_diff + r2_diff_sq + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="glasso" & type=="Comparator")))
-summary(m4 <- lmer(value ~ r2_diff + r2_diff_sq + r2_diff_cu + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="glasso" & type=="Comparator")))
+summary(m3 <- lmer(value ~ r2_diff + r2_diff_sq + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="EBICGLASSO" & type=="Comparator")))
+summary(m4 <- lmer(value ~ r2_diff + r2_diff_sq + r2_diff_cu + (1|condition:graphNum), filter(nodalstats, measure=="strength" & method=="EBICGLASSO" & type=="Comparator")))
 anova(m3, m4)
 
 #too crazy... overpowered. Go to aggregated variant using candidate nodes from graph
@@ -325,9 +331,9 @@ nodalstats_repagg <- nodalstats_filtered %>% group_by(node, method, measure, r2_
 )
 
 #STRENGTH GLASSO TARGET
-summary(m2 <- lm(Mean ~ r2_diff, filter(nodalstats_repagg, measure=="strength" & method=="glasso" & node=="Target")))
-summary(m3 <- lm(Mean ~ r2_diff + r2_diff_sq , filter(nodalstats_repagg, measure=="strength" & method=="glasso" & node=="Target")))
-summary(m4 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu, filter(nodalstats_repagg, measure=="strength" & method=="glasso" & node=="Target")))
+summary(m2 <- lm(Mean ~ r2_diff, filter(nodalstats_repagg, measure=="strength" & method=="EBICGLASSO" & node=="Target")))
+summary(m3 <- lm(Mean ~ r2_diff + r2_diff_sq , filter(nodalstats_repagg, measure=="strength" & method=="EBICGLASSO" & node=="Target")))
+summary(m4 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu, filter(nodalstats_repagg, measure=="strength" & method=="EBICGLASSO" & node=="Target")))
 
 anova(m2, m3, m4)
 
@@ -339,9 +345,9 @@ summary(m4 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu, filter(nodalstats_rep
 anova(m2, m3, m4)
 
 #STRENGTH GLASSO COMPARATOR
-summary(m2 <- lm(Mean ~ r2_diff, filter(nodalstats_repagg, measure=="strength" & method=="glasso" & node=="Comparator")))
-summary(m3 <- lm(Mean ~ r2_diff + r2_diff_sq , filter(nodalstats_repagg, measure=="strength" & method=="glasso" & node=="Comparator")))
-summary(m4 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu, filter(nodalstats_repagg, measure=="strength" & method=="glasso" & node=="Comparator")))
+summary(m2 <- lm(Mean ~ r2_diff, filter(nodalstats_repagg, measure=="strength" & method=="EBICGLASSO" & node=="Comparator")))
+summary(m3 <- lm(Mean ~ r2_diff + r2_diff_sq , filter(nodalstats_repagg, measure=="strength" & method=="EBICGLASSO" & node=="Comparator")))
+summary(m4 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu, filter(nodalstats_repagg, measure=="strength" & method=="EBICGLASSO" & node=="Comparator")))
 
 anova(m2, m3, m4)
 
@@ -354,9 +360,9 @@ anova(m2, m3, m4)
 
 
 #closeness GLASSO TARGET
-summary(m2 <- lm(Mean ~ r2_diff, filter(nodalstats_repagg, measure=="closeness" & method=="glasso" & node=="Target")))
-summary(m3 <- lm(Mean ~ r2_diff + r2_diff_sq , filter(nodalstats_repagg, measure=="closeness" & method=="glasso" & node=="Target")))
-summary(m4 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu, filter(nodalstats_repagg, measure=="closeness" & method=="glasso" & node=="Target")))
+summary(m2 <- lm(Mean ~ r2_diff, filter(nodalstats_repagg, measure=="closeness" & method=="EBICGLASSO" & node=="Target")))
+summary(m3 <- lm(Mean ~ r2_diff + r2_diff_sq , filter(nodalstats_repagg, measure=="closeness" & method=="EBICGLASSO" & node=="Target")))
+summary(m4 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu, filter(nodalstats_repagg, measure=="closeness" & method=="EBICGLASSO" & node=="Target")))
 
 anova(m2, m3, m4)
 
@@ -368,13 +374,13 @@ summary(m4 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu, filter(nodalstats_rep
 anova(m2, m3, m4)
 
 #closeness GLASSO COMPARATOR
-summary(m2 <- lm(Mean ~ r2_diff, filter(nodalstats_repagg, measure=="closeness" & method=="glasso" & node=="Comparator")))
-summary(m3 <- lm(Mean ~ r2_diff + r2_diff_sq , filter(nodalstats_repagg, measure=="closeness" & method=="glasso" & node=="Comparator")))
-summary(m4 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu, filter(nodalstats_repagg, measure=="closeness" & method=="glasso" & node=="Comparator")))
+summary(m2 <- lm(Mean ~ r2_diff, filter(nodalstats_repagg, measure=="closeness" & method=="EBICGLASSO" & node=="Comparator")))
+summary(m3 <- lm(Mean ~ r2_diff + r2_diff_sq , filter(nodalstats_repagg, measure=="closeness" & method=="EBICGLASSO" & node=="Comparator")))
+summary(m4 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu, filter(nodalstats_repagg, measure=="closeness" & method=="EBICGLASSO" & node=="Comparator")))
 
 anova(m2, m3, m4)
 
-summary(m3 <- lm(Mean ~ r2_diff*node + r2_diff_sq*node , filter(nodalstats_repagg, measure=="closeness" & method=="glasso")))
+summary(m3 <- lm(Mean ~ r2_diff*node + r2_diff_sq*node , filter(nodalstats_repagg, measure=="closeness" & method=="EBICGLASSO")))
 anova(m3)
 
 #closeness PCOR COMPARATOR
@@ -386,10 +392,10 @@ anova(m2, m3, m4)
 
 
 #betweenness GLASSO TARGET
-summary(m2 <- lm(Mean ~ r2_diff, filter(nodalstats_repagg, measure=="betweenness" & method=="glasso" & node=="Target")))
-summary(m3 <- lm(Mean ~ r2_diff + r2_diff_sq , filter(nodalstats_repagg, measure=="betweenness" & method=="glasso" & node=="Target")))
-summary(m4 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu, filter(nodalstats_repagg, measure=="betweenness" & method=="glasso" & node=="Target")))
-summary(m5 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu + r2_diff_qu, filter(nodalstats_repagg, measure=="betweenness" & method=="glasso" & node=="Target")))
+summary(m2 <- lm(Mean ~ r2_diff, filter(nodalstats_repagg, measure=="betweenness" & method=="EBICGLASSO" & node=="Target")))
+summary(m3 <- lm(Mean ~ r2_diff + r2_diff_sq , filter(nodalstats_repagg, measure=="betweenness" & method=="EBICGLASSO" & node=="Target")))
+summary(m4 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu, filter(nodalstats_repagg, measure=="betweenness" & method=="EBICGLASSO" & node=="Target")))
+summary(m5 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu + r2_diff_qu, filter(nodalstats_repagg, measure=="betweenness" & method=="EBICGLASSO" & node=="Target")))
 
 anova(m2, m3, m4, m5)
 
@@ -404,13 +410,13 @@ summary(m5 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu + r2_diff_qu, filter(n
 anova(m2, m3, m4, m5)
 
 #betweenness GLASSO COMPARATOR
-summary(m2 <- lm(Mean ~ r2_diff, filter(nodalstats_repagg, measure=="betweenness" & method=="glasso" & node=="Comparator")))
-summary(m3 <- lm(Mean ~ r2_diff + r2_diff_sq , filter(nodalstats_repagg, measure=="betweenness" & method=="glasso" & node=="Comparator")))
-summary(m4 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu, filter(nodalstats_repagg, measure=="betweenness" & method=="glasso" & node=="Comparator")))
+summary(m2 <- lm(Mean ~ r2_diff, filter(nodalstats_repagg, measure=="betweenness" & method=="EBICGLASSO" & node=="Comparator")))
+summary(m3 <- lm(Mean ~ r2_diff + r2_diff_sq , filter(nodalstats_repagg, measure=="betweenness" & method=="EBICGLASSO" & node=="Comparator")))
+summary(m4 <- lm(Mean ~ r2_diff + r2_diff_sq + r2_diff_cu, filter(nodalstats_repagg, measure=="betweenness" & method=="EBICGLASSO" & node=="Comparator")))
 
 anova(m2, m3, m4)
 
-summary(m3 <- lm(Mean ~ r2_diff*node + r2_diff_sq*node , filter(nodalstats_repagg, measure=="betweenness" & method=="glasso")))
+summary(m3 <- lm(Mean ~ r2_diff*node + r2_diff_sq*node , filter(nodalstats_repagg, measure=="betweenness" & method=="EBICGLASSO")))
 anova(m3)
 
 #betweenness PCOR COMPARATOR

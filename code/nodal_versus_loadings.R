@@ -102,7 +102,8 @@ dev.off()
 
 pdf("figures/heatmap_pearson_twofactor.pdf", width=8, height=7)
 g1 <- ggplot(mdf, aes(x=Var1, y=Var2, fill=value)) + geom_tile() + 
-  scale_fill_viridis(expression(paste("Correlation\n(Pearson", italic("r"), ")")), limits=c(-.1, .75)) + ylab("") + xlab("Item") + #breaks=c(0, 0.2, 0.4, 0.6)
+  scale_fill_viridis(expression(paste("Correlation\n(Pearson", italic("r"), ")")), limits=c(-.05, .8), option="inferno") + ylab("") + xlab("Item") + #breaks=c(0, 0.2, 0.4, 0.6)
+  #scale_fill_distiller(expression(paste("Correlation\n(Pearson", italic("r"), ")")), limits=c(-.05, 0.8), palette="PuBu") + ylab("") + xlab("Item") + # breaks=c(0.2, 0.4, 0.6)
   theme(axis.text.x=element_text(angle=90, hjust=0.5, vjust=0.5), axis.title.x=element_text(margin=margin(t=15))) + coord_fixed()
 plot(g1)
 dev.off()
@@ -148,7 +149,8 @@ outstruct <- summarize_loadings_convergence(dd2_corr)
 
 pdf("figures/heatmap_pearson_twofactor_corr.pdf", width=8, height=7)
 g3 <- ggplot(mdf, aes(x=Var1, y=Var2, fill=value)) + geom_tile() + 
-  scale_fill_viridis(expression(paste("Correlation\n(Pearson", italic("r"), ")")), limits=c(-0.1, 0.75)) + ylab("") + xlab("Item") + # breaks=c(0.2, 0.4, 0.6)
+  scale_fill_viridis(expression(paste("Correlation\n(Pearson", italic("r"), ")")), limits=c(-0.05, 0.8), option="inferno") + ylab("") + xlab("Item") + # breaks=c(0.2, 0.4, 0.6)
+  #scale_fill_distiller(expression(paste("Correlation\n(Pearson", italic("r"), ")")), limits=c(-0.05, 0.8), palette="PuBu") + ylab("") + xlab("Item") + # breaks=c(0.2, 0.4, 0.6)
   theme(axis.text.x=element_text(angle=90, hjust=0.5, vjust=0.5), axis.title.x=element_text(margin=margin(t=15))) + coord_fixed()
 plot(g3)
 dev.off()
@@ -401,8 +403,8 @@ ofd_all_orthogonal_glasso <- get_off_factor_dist_allexamples(dd2, edge_method="E
 ofd_all_orthogonal_pcor <- get_off_factor_dist_allexamples(dd2, edge_method="pcor")
 
 #hacky way to get correlated results for two-panel figure (uncomment and re-run, store into ggcorr object...)
-#ofd_all_orthogonal_glasso <- get_off_factor_dist_allexamples(dd2_corr, edge_method="EBICglasso")
-#ofd_all_orthogonal_pcor <- get_off_factor_dist_allexamples(dd2_corr, edge_method="pcor")
+ofd_all_orthogonal_glasso <- get_off_factor_dist_allexamples(dd2_corr, edge_method="EBICglasso")
+ofd_all_orthogonal_pcor <- get_off_factor_dist_allexamples(dd2_corr, edge_method="pcor")
 
 
 #combine f1, f2 loading columns (since they are only not NA for the primary loading)
@@ -505,7 +507,9 @@ pdf("figures/loadings_v_off_factor_lmercoefs_orthogonal.pdf", width=8, height=5)
 ggorthogonal <- ggplot(par_all, aes(x=term, y=estimate, ymin=ci_0.5, ymax=ci_99.5, color=method, fill=method)) + 
   geom_col(position=position_dodge(width=0.5), width=0.4) + geom_linerange(position=position_dodge(width=0.5), size=2, color="black") + facet_grid(. ~ metric, scales="free") + theme_bw(base_size=14) +
   theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank()) + ylab("Standardized coefficient") + xlab("Predictor") +
-  scale_fill_brewer("Edge definition", palette="Set1") + scale_color_brewer("Edge definition", palette="Set1")
+  #scale_fill_brewer("Edge definition", palette="Set2") + scale_color_brewer("Edge definition", palette="Set2")
+  scale_fill_viridis("Edge definition", discrete=TRUE, begin=0.2, end=0.8, option="cividis") + scale_color_viridis("Edge definition", discrete=TRUE, begin=0.2, end=0.8, option="cividis")
+
 plot(ggorthogonal)
 dev.off()
 

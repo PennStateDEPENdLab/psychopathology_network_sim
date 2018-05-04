@@ -227,14 +227,18 @@ summary(lm(value ~ f1c + f2c + f1sq + f2sq, cmat_wide)) #so measure becomes huge
 summary(lmer(value ~ f1c + f2c + f1sq+ f2sq + (1|graphNum), cmat_wide)) #so measure becomes hugely predicted by each loading
 
 #aggregate replications within each combination of f1 and f2loading
-closeness_agg <- cmat_wide %>% group_by(f1, f2) %>% summarize_at(vars(value, y10_gmetric, y3_gmetric, y10_fittedloading, y3_fittedloading), funs(mean)) %>% ungroup() %>% mutate(f1c=f1-mean(f1), f2c=f2-mean(f2), f1sq=f1c^2, f2sq=f2c^2)
+closeness_agg <- cmat_wide %>% group_by(f1, f2) %>% 
+  summarize_at(vars(value, y10_gmetric, y3_gmetric, y10_fittedloading, y3_fittedloading), funs(mean)) %>% 
+  ungroup() %>% mutate(f1c=f1-mean(f1), f2c=f2-mean(f2), f1sq=f1c^2, f2sq=f2c^2, f1xf2=f1c*f2c)
 summary(m1 <- lm(value ~ f1c * f2c + f1sq + f2sq, closeness_agg)) #so measure becomes hugely predicted by each loading
+summary(m1 <- lm(value ~ f1c + f2c + f1sq + f2sq + f1xf2, closeness_agg)) #so measure becomes hugely predicted by each loading
+
 
 #misses the interaction...
 apa.reg.table(m1, filename="/Users/mnh5174/TresorSync/Manuscripts/Hallquist Cross-Sectional Networks Critique 2016/sim3 closeness reg.doc")
 
-
-summary(lm(y10_gmetric ~ f1c * f2c + f1sq + f2sq, closeness_agg)) #so measure becomes hugely predicted by each loading
+summary(m2 <- lm(y10_gmetric ~ f1c + f2c + f1sq + f2sq + f1xf2, closeness_agg)) #so measure becomes hugely predicted by each loading
+apa.reg.table(m2, filename="/Users/mnh5174/TresorSync/Manuscripts/Hallquist Cross-Sectional Networks Critique 2016/sim3 closeness reg comparator.doc")
 summary(lm(y10_gmetric ~ f1c * f2c + f1sq + f2sq + y10_fittedloading, closeness_agg)) #so measure becomes hugely predicted by each loading
 
 with(closeness_agg, cor.test(y10_gmetric, value))
@@ -287,8 +291,8 @@ summary(lm(value ~ f1c + f2c + f1sq + f2sq, bmat_wide)) #so measure becomes huge
 summary(lmer(value ~ f1c + f2c + f1sq + f2sq + (1|condition) + (1|graphNum), bmat_wide)) #so measure becomes hugely predicted by each loading
 
 #aggregate replications within each combination of f1 and f2loading
-betweenness_agg <- bmat_wide %>% group_by(f1, f2) %>% summarize_at(vars(value, y10_gmetric, y3_gmetric, y10_fittedloading, y3_fittedloading), funs(mean)) %>% ungroup() %>% mutate(f1c=f1-mean(f1), f2c=f2-mean(f2), f1sq=f1c^2, f2sq=f2c^2)
-summary(m1 <- lm(value ~ f1c * f2c, betweenness_agg))
+betweenness_agg <- bmat_wide %>% group_by(f1, f2) %>% summarize_at(vars(value, y10_gmetric, y3_gmetric, y10_fittedloading, y3_fittedloading), funs(mean)) %>% ungroup() %>% mutate(f1c=f1-mean(f1), f2c=f2-mean(f2), f1sq=f1c^2, f2sq=f2c^2, f1xf2=f1c*f2c)
+summary(m1 <- lm(value ~ f1c + f2c + f1xf2, betweenness_agg))
 betweenness_agg$vv <- predict(m1)
 ggplot(betweenness_agg, aes(x=f1c, y=f2c, fill=vv)) + geom_tile() + coord_fixed()
 apa.reg.table(m1, filename="/Users/mnh5174/TresorSync/Manuscripts/Hallquist Cross-Sectional Networks Critique 2016/sim3 betweenness reg.doc")
@@ -297,7 +301,7 @@ summary(m2 <- lm(value ~ f1c * f2c + f1sq * f2sq, betweenness_agg)) #so measure 
 
 anova(m1, m2)
 
-summary(m1 <- lm(y10_gmetric ~ f1c * f2c , betweenness_agg)) #+ f1sq * f2sq + y3_fittedloading
+summary(m1 <- lm(y10_gmetric ~ f1c + f2c + f1xf2, betweenness_agg)) #+ f1sq * f2sq + y3_fittedloading
 apa.reg.table(m1, filename="/Users/mnh5174/TresorSync/Manuscripts/Hallquist Cross-Sectional Networks Critique 2016/sim3 betweenness comparator reg.doc")
 summary(m2 <- lm(y10_gmetric ~ f1c * f2c + f1sq * f2sq, betweenness_agg)) #+ f1sq * f2sq + y3_fittedloading
 summary(m3 <- lm(y10_gmetric ~ f1c * f2c + f1sq * f2sq + y3_fittedloading, betweenness_agg)) #+ f1sq * f2sq + y3_fittedloading
